@@ -18,6 +18,7 @@
   <link id="font-css" rel="stylesheet" media="print" onload="this.media='all'"
         href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@300;700&family=Bebas+Neue&family=DM+Serif+Display&family=Fredoka:wght@600&family=JetBrains+Mono:wght@700&family=Orbitron:wght@700&family=Oswald:wght@600&family=Rubik:wght@600&family=VT323&display=swap">
   <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/faces.css">
   <script>
     // Paint the saved background before anything else loads, so there's no flash.
     try { var bg = localStorage.getItem('focus.bg'); if (bg) document.documentElement.style.background = bg; } catch (e) {}
@@ -38,7 +39,10 @@
           <button id="btn-cat" class="pill" aria-label="Choose category">
             <span class="dot"></span><span class="pill-name">Study</span><span data-icon="chevronRight"></span>
           </button>
-          <button class="icon-btn" data-open-settings data-icon="settings" aria-label="Settings" title="Settings"></button>
+          <div class="topbar-right">
+            <button class="icon-btn" data-open-looks data-icon="palette" aria-label="Looks" title="Looks"></button>
+            <button class="icon-btn" data-open-settings data-icon="settings" aria-label="Settings" title="Settings"></button>
+          </div>
         </header>
         <main class="stage">
           <div id="clock" class="clock" role="timer" aria-label="Tap to edit the time" title="Tap to edit"></div>

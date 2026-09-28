@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -51,7 +51,71 @@ const SOUNDS = [
 ];
 
 const TIMER_PRESETS = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120];
-return { APP_VERSION, THEMES, themeColors, FONTS, fontById, PALETTE, SOUNDS, TIMER_PRESETS };
+
+/** Every setting that belongs to "the look". A template resets all of these, then applies its own. */
+const LOOK_DEFAULTS = {
+  theme: 'classic',
+  face: 'flip',
+  font: 'barlow',
+  faceColor: 'auto', // or a hex colour; "auto" = each style's own colour
+  glow: 0.6,
+  ghost: true, // show unlit LED segments / dots / nixie cathodes
+  ticks: true, // tick marks on Ring and Analog
+  blink: true, // blinking colon
+  flipSpeed: 'normal',
+  shade: false, // card depth shading on Flip
+  backdrop: 'none', // none | glow | gradient
+  aurora: 'ocean',
+  digitScale: 1,
+  radius: 0.09,
+  hinge: true,
+  flip: true,
+};
+const LOOK_KEYS = new Set([...Object.keys(LOOK_DEFAULTS), 'custom']);
+
+const FACE_COLORS = [
+  ['auto', 'Auto'],
+  ['#d4e157', 'Lime'],
+  ['#ff5a4f', 'Red'],
+  ['#ff9a3c', 'Orange'],
+  ['#ffd166', 'Yellow'],
+  ['#4ade80', 'Green'],
+  ['#22d3ee', 'Cyan'],
+  ['#60a5fa', 'Blue'],
+  ['#a78bfa', 'Violet'],
+  ['#f472b6', 'Pink'],
+  ['#f5f5f5', 'White'],
+];
+
+const AURORAS = [
+  ['ocean', 'Ocean'],
+  ['sunset', 'Sunset'],
+  ['forest', 'Forest'],
+  ['berry', 'Berry'],
+];
+
+/** One-tap looks. Anything not listed falls back to LOOK_DEFAULTS. */
+const TEMPLATES = [
+  { id: 'classic', name: 'Classic Flip', look: {} },
+  { id: 'paper', name: 'Paper Flip', look: { theme: 'paper', shade: true } },
+  { id: 'nixie', name: 'Retro Nixie', look: { theme: 'amber', face: 'nixie', backdrop: 'glow' } },
+  { id: 'neon', name: 'Neon Night', look: { theme: 'midnight', face: 'neon', font: 'fredoka', faceColor: '#f472b6', glow: 0.8, backdrop: 'glow' } },
+  { id: 'aurora', name: 'Aurora', look: { theme: 'midnight', face: 'aurora', font: 'rubik', aurora: 'ocean', backdrop: 'gradient' } },
+  { id: 'bedside', name: 'Bedside LED', look: { theme: 'crimson', face: 'led', faceColor: '#ff5a4f', glow: 0.8 } },
+  { id: 'arcade', name: 'Arcade', look: { theme: 'ocean', face: 'dots', faceColor: '#22d3ee', glow: 0.8, backdrop: 'glow' } },
+  { id: 'zen', name: 'Zen Ring', look: { theme: 'mist', face: 'ring', font: 'rubik' } },
+  { id: 'watch', name: 'Wristwatch', look: { theme: 'paper', face: 'analog', font: 'serif' } },
+  { id: 'nightwatch', name: 'Night Watch', look: { theme: 'graphite', face: 'analog', faceColor: '#ff9a3c' } },
+  { id: 'mint', name: 'Mint LED', look: { theme: 'forest', face: 'led', faceColor: '#4ade80' } },
+  { id: 'sunset', name: 'Sunset', look: { theme: 'rose', face: 'aurora', font: 'fredoka', aurora: 'sunset', backdrop: 'glow' } },
+  { id: 'mono', name: 'Mono', look: { theme: 'graphite', face: 'minimal', font: 'mono' } },
+  { id: 'terminal', name: 'Terminal', look: { theme: 'forest', face: 'minimal', font: 'pixel' } },
+  { id: 'poster', name: 'Poster', look: { theme: 'classic', face: 'minimal', font: 'bebas' } },
+  { id: 'ice', name: 'Ice Nixie', look: { theme: 'ocean', face: 'nixie', faceColor: '#60a5fa', backdrop: 'glow' } },
+];
+
+const templateLook = (t) => ({ ...LOOK_DEFAULTS, ...t.look });
+return { APP_VERSION, THEMES, themeColors, FONTS, fontById, PALETTE, SOUNDS, TIMER_PRESETS, LOOK_DEFAULTS, LOOK_KEYS, FACE_COLORS, AURORAS, TEMPLATES, templateLook };
 })();
 
 // ---------- util.js ----------
@@ -130,7 +194,17 @@ const KEY = 'focus.v1';
 const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
-  face: 'flip', // flip | minimal | led | nixie | ring
+  face: 'flip', // see FACES in faces.js
+  template: 'classic', // last template applied; null once you customise
+  faceColor: 'auto',
+  glow: 0.6,
+  ghost: true,
+  ticks: true,
+  blink: true,
+  flipSpeed: 'normal',
+  shade: false,
+  backdrop: 'none',
+  aurora: 'ocean',
   font: 'barlow',
   digitScale: 1,
   radius: 0.09,
@@ -1281,6 +1355,10 @@ return { FlipClock, clearMetrics, fontMetrics, sizeCards };
 __m.faces = (() => {
 // Clock faces. Every face shows a list of digit groups (e.g. ['47', '19']) and sizes itself
 // to the box it's given. Flip is the original split-flap clock; the others are alternatives.
+//
+// makeFace(el, type, ctx) — ctx can override the font and settings (used by template previews).
+// face.render(groups, { animate, running, progress, label, ms, date })
+// face.fit({ W, H, row, stretch })
 const { FlipClock, fontMetrics, sizeCards } = __m.flip;
 const { fontById } = __m.config;
 const { data } = __m.store;
@@ -1289,37 +1367,48 @@ const { clamp } = __m.util;
 const FACES = [
   ['flip', 'Flip'],
   ['minimal', 'Minimal'],
+  ['neon', 'Neon'],
+  ['aurora', 'Aurora'],
   ['led', 'LED'],
+  ['dots', 'Dot matrix'],
   ['nixie', 'Nixie'],
   ['ring', 'Ring'],
+  ['analog', 'Analog'],
 ];
 
-const metrics = () => fontMetrics(fontById(data.settings.font));
+const FLIP_SPEED = { slow: 900, normal: 620, fast: 380 };
 const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
 
 /** Builds a face inside `el` (replacing whatever was there). */
-function makeFace(el, type = 'flip') {
+function makeFace(el, type = 'flip', ctx = {}) {
   if (!FACES.some(([id]) => id === type)) type = 'flip';
   for (const a of el.getAnimations({ subtree: true })) a.cancel();
   el.innerHTML = '';
   el.removeAttribute('style');
   for (const [id] of FACES) el.classList.remove(`face-${id}`);
   el.classList.add(`face-${type}`);
-  const face = { flip: flipFace, minimal: minimalFace, led: ledFace, nixie: nixieFace, ring: ringFace }[type](el);
+  const env = {
+    s: () => ctx.settings || data.settings,
+    m: () => fontMetrics(fontById(ctx.font || (ctx.settings || data.settings).font)),
+  };
+  const build = { flip: flipFace, minimal: textFace, neon: textFace, aurora: textFace, led: ledFace, dots: dotsFace, nixie: nixieFace, ring: ringFace, analog: analogFace };
+  const face = build[type](el, env, type);
   face.type = type;
   return face;
 }
 
 /* ---------- Flip: split-flap cards ---------- */
 
-function flipFace(el) {
+function flipFace(el, env) {
   const clock = new FlipClock(el);
   return {
     get count() {
       return clock.cards.length;
     },
     render(groups, o = {}) {
-      clock.render(groups, !!o.animate && data.settings.flip);
+      const s = env.s();
+      clock.duration = FLIP_SPEED[s.flipSpeed] || 620;
+      clock.render(groups, !!o.animate && s.flip !== false);
     },
     fit({ W, H, row, stretch }) {
       const n = Math.max(1, clock.cards.length);
@@ -1338,14 +1427,13 @@ function flipFace(el) {
         ch = Math.min(ch, cw * (stretch ? 1.35 : 1));
       }
       el.style.flexDirection = row ? 'row' : 'column';
-      sizeCards(el, { cw: Math.floor(cw), ch: Math.floor(ch / 2) * 2, gap: Math.round(gap) }, metrics(), data.settings);
+      sizeCards(el, { cw: Math.floor(cw), ch: Math.floor(ch / 2) * 2, gap: Math.round(gap) }, env.m(), env.s());
     },
   };
 }
 
-/* ---------- helpers for faces made of digit groups ---------- */
+/* ---------- helper for faces made of digit groups ---------- */
 
-/** Keeps `n` groups of digit elements in `root`, with separators between them. */
 function groupKeeper(root, { groupClass, sepHtml, digitHtml }) {
   let groups = [];
   return {
@@ -1365,7 +1453,6 @@ function groupKeeper(root, { groupClass, sepHtml, digitHtml }) {
       }
       return true;
     },
-    /** Makes sure a group has one element per character; returns the digit elements. */
     digits(g, len) {
       if (g.digits.length !== len) {
         g.el.innerHTML = digitHtml.repeat(len);
@@ -1377,13 +1464,18 @@ function groupKeeper(root, { groupClass, sepHtml, digitHtml }) {
   };
 }
 
-/* ---------- Minimal: big clean digits that roll into place ---------- */
+/* ---------- Minimal, Neon and Aurora: big type ---------- */
 
-function minimalFace(el) {
+function textFace(el, env, variant) {
+  if (variant === 'aurora') el.insertAdjacentHTML('beforeend', '<div class="au-bg" aria-hidden="true"><i></i><i></i><i></i></div>');
   const root = document.createElement('div');
-  root.className = 'mn';
+  root.className = `mn ${variant}`;
   el.appendChild(root);
   const k = groupKeeper(root, { groupClass: 'mn-g', sepHtml: '<span class="mn-sep">:</span>', digitHtml: '<span class="mn-d"></span>' });
+  const enter =
+    variant === 'neon'
+      ? [{ opacity: 0.15, filter: 'brightness(2)' }, { opacity: 1, filter: 'none' }]
+      : [{ transform: 'translateY(-28%)', opacity: 0 }, { transform: 'none', opacity: 1 }];
   return {
     get count() {
       return k.list.length;
@@ -1391,6 +1483,13 @@ function minimalFace(el) {
     render(vals, o = {}) {
       k.ensure(vals.length);
       root.classList.toggle('running', !!o.running);
+      if (variant === 'aurora') {
+        const pal = `pal-${env.s().aurora || 'ocean'}`;
+        if (!el.classList.contains(pal)) {
+          for (const c of [...el.classList]) if (c.startsWith('pal-')) el.classList.remove(c);
+          el.classList.add(pal);
+        }
+      }
       vals.forEach((v, i) => {
         const g = k.list[i];
         if (g.value === v) return;
@@ -1399,15 +1498,13 @@ function minimalFace(el) {
         [...v].forEach((ch, j) => {
           if (ds[j].textContent === ch) return;
           ds[j].textContent = ch;
-          if (o.animate && had) {
-            ds[j].animate([{ transform: 'translateY(-28%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 340, easing: 'cubic-bezier(.2,.8,.2,1)' });
-          }
+          if (o.animate && had) ds[j].animate(enter, { duration: variant === 'neon' ? 260 : 340, easing: 'cubic-bezier(.2,.8,.2,1)' });
         });
         g.value = v;
       });
     },
     fit({ W, H, row }) {
-      const m = metrics();
+      const m = env.m();
       const n = Math.max(1, k.list.length);
       const len = Math.max(2, ...k.list.map((g) => g.value.length || 2));
       let fs;
@@ -1427,18 +1524,9 @@ const T = 11;
 const HW = T / 2;
 const hSeg = (x1, x2, y) => `${x1},${y} ${x1 + HW},${y - HW} ${x2 - HW},${y - HW} ${x2},${y} ${x2 - HW},${y + HW} ${x1 + HW},${y + HW}`;
 const vSeg = (x, y1, y2) => `${x},${y1} ${x + HW},${y1 + HW} ${x + HW},${y2 - HW} ${x},${y2} ${x - HW},${y2 - HW} ${x - HW},${y1 + HW}`;
-const SEGS = {
-  a: hSeg(10, 50, 8),
-  b: vSeg(52, 10, 48),
-  c: vSeg(52, 52, 90),
-  d: hSeg(10, 50, 92),
-  e: vSeg(8, 52, 90),
-  f: vSeg(8, 10, 48),
-  g: hSeg(10, 50, 50),
-};
+const SEGS = { a: hSeg(10, 50, 8), b: vSeg(52, 10, 48), c: vSeg(52, 52, 90), d: hSeg(10, 50, 92), e: vSeg(8, 52, 90), f: vSeg(8, 10, 48), g: hSeg(10, 50, 50) };
 const LIT = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'acdefg', 'abc', 'abcdefg', 'abcdfg'];
-const ledDigit = (x) =>
-  `<g transform="translate(${x},0) skewX(-6)">${Object.entries(SEGS).map(([s, p]) => `<polygon class="s" data-s="${s}" points="${p}"/>`).join('')}</g>`;
+const ledDigit = (x) => `<g transform="translate(${x},0) skewX(-6)">${Object.entries(SEGS).map(([s, p]) => `<polygon class="s" data-s="${s}" points="${p}"/>`).join('')}</g>`;
 
 function ledFace(el) {
   const root = document.createElement('div');
@@ -1450,8 +1538,7 @@ function ledFace(el) {
     groups = vals.map((v, i) => {
       if (i) root.insertAdjacentHTML('beforeend', '<span class="led-sep"><i></i><i></i></span>');
       const len = v.length;
-      const w = len * 66 - 6;
-      root.insertAdjacentHTML('beforeend', `<svg class="led-g" viewBox="-12 0 ${w + 14} 100" style="--n:${len}" aria-hidden="true">${[...Array(len)].map((_, j) => ledDigit(j * 66)).join('')}</svg>`);
+      root.insertAdjacentHTML('beforeend', `<svg class="led-g" viewBox="-12 0 ${len * 66 + 8} 100" aria-hidden="true">${[...Array(len)].map((_, j) => ledDigit(j * 66)).join('')}</svg>`);
       const svg = root.lastElementChild;
       return { len, value: '', digits: [...svg.querySelectorAll('g')].map((g) => [...g.querySelectorAll('.s')]) };
     });
@@ -1476,12 +1563,72 @@ function ledFace(el) {
     fit({ W, H, row }) {
       const n = Math.max(1, groups.length);
       const len = Math.max(2, ...groups.map((g) => g.len));
-      const ratio = (len * 66 + 8) / 100; // width / height of one group
-      let h;
-      if (row) h = Math.min(H * 0.72, (W * 0.84) / (n * ratio + (n - 1) * 0.36));
-      else h = Math.min((H * 0.8) / n - H * 0.02, (W * 0.8) / ratio);
+      const ratio = (len * 66 + 8) / 100;
+      const h = row ? Math.min(H * 0.72, (W * 0.84) / (n * ratio + (n - 1) * 0.36)) : Math.min((H * 0.8) / n - H * 0.02, (W * 0.8) / ratio);
       root.classList.toggle('col', !row);
       px(el, '--lh', Math.max(10, h));
+    },
+  };
+}
+
+/* ---------- Dot matrix: 5 × 7 LED board ---------- */
+
+const DOT_FONT = {
+  0: ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
+  1: ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  2: ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
+  3: ['11111', '00010', '00100', '00010', '00001', '10001', '01110'],
+  4: ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
+  5: ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
+  6: ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
+  7: ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+  8: ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
+  9: ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
+};
+
+function dotsFace(el) {
+  const root = document.createElement('div');
+  root.className = 'dm';
+  el.appendChild(root);
+  let groups = [];
+  const build = (vals) => {
+    root.innerHTML = '';
+    groups = vals.map((v, i) => {
+      if (i) root.insertAdjacentHTML('beforeend', '<span class="dm-sep"><i></i><i></i></span>');
+      const len = v.length;
+      let dots = '';
+      for (let d = 0; d < len; d++) {
+        for (let r = 0; r < 7; r++) for (let c = 0; c < 5; c++) dots += `<circle class="d" cx="${d * 60 + c * 10 + 5}" cy="${r * 10 + 5}" r="4"/>`;
+      }
+      root.insertAdjacentHTML('beforeend', `<svg class="dm-g" viewBox="0 0 ${len * 60 - 10} 70" aria-hidden="true">${dots}</svg>`);
+      const all = [...root.lastElementChild.querySelectorAll('.d')];
+      return { len, value: '', digits: [...Array(len)].map((_, d) => all.slice(d * 35, d * 35 + 35)) };
+    });
+  };
+  return {
+    get count() {
+      return groups.length;
+    },
+    render(vals, o = {}) {
+      if (vals.length !== groups.length || vals.some((v, i) => v.length !== groups[i].len)) build(vals);
+      root.classList.toggle('running', !!o.running);
+      vals.forEach((v, i) => {
+        const g = groups[i];
+        if (g.value === v) return;
+        g.value = v;
+        [...v].forEach((ch, j) => {
+          const rows = DOT_FONT[ch] || DOT_FONT[0];
+          g.digits[j].forEach((dot, idx) => dot.classList.toggle('on', rows[Math.floor(idx / 5)][idx % 5] === '1'));
+        });
+      });
+    },
+    fit({ W, H, row }) {
+      const n = Math.max(1, groups.length);
+      const len = Math.max(2, ...groups.map((g) => g.len));
+      const ratio = (len * 60 - 10) / 70;
+      const h = row ? Math.min(H * 0.62, (W * 0.88) / (n * ratio + (n - 1) * 0.42)) : Math.min((H * 0.78) / n - H * 0.03, (W * 0.86) / ratio);
+      root.classList.toggle('col', !row);
+      px(el, '--dh', Math.max(8, h));
     },
   };
 }
@@ -1515,10 +1662,10 @@ function nixieFace(el) {
     fit({ W, H, row }) {
       const n = Math.max(1, k.list.length);
       const len = Math.max(2, ...k.list.map((g) => g.value.length || 2));
-      const A = 0.6; // tube width / height
-      let tw;
-      if (row) tw = Math.min((W * 0.92) / (n * len + n * 0.1 * (len - 1) + (n - 1) * 0.5), H * 0.8 * A);
-      else tw = Math.min((W * 0.86) / (len + 0.1 * (len - 1)), ((H * 0.9) / n - H * 0.03) * A);
+      const A = 0.6;
+      const tw = row
+        ? Math.min((W * 0.92) / (n * len + n * 0.1 * (len - 1) + (n - 1) * 0.5), H * 0.8 * A)
+        : Math.min((W * 0.86) / (len + 0.1 * (len - 1)), ((H * 0.9) / n - H * 0.03) * A);
       root.classList.toggle('col', !row);
       px(el, '--tw', tw);
       px(el, '--th', tw / A);
@@ -1531,17 +1678,20 @@ function nixieFace(el) {
 const R = 84;
 const CIRC = 2 * Math.PI * R;
 
-function ringFace(el) {
-  let ticks = '';
+function ticksSvg(r1Major, r1, r2, cls = '') {
+  let out = '';
   for (let i = 0; i < 60; i++) {
     const a = (i / 60) * 2 * Math.PI;
     const major = i % 5 === 0;
-    const r1 = major ? 91 : 93.5;
-    const r2 = 97;
-    ticks += `<line class="${major ? 'major' : ''}" x1="${100 + r1 * Math.sin(a)}" y1="${100 - r1 * Math.cos(a)}" x2="${100 + r2 * Math.sin(a)}" y2="${100 - r2 * Math.cos(a)}"/>`;
+    const ra = major ? r1Major : r1;
+    out += `<line class="${major ? `major ${cls}` : cls}" x1="${(100 + ra * Math.sin(a)).toFixed(2)}" y1="${(100 - ra * Math.cos(a)).toFixed(2)}" x2="${(100 + r2 * Math.sin(a)).toFixed(2)}" y2="${(100 - r2 * Math.cos(a)).toFixed(2)}"/>`;
   }
+  return out;
+}
+
+function ringFace(el, env) {
   el.innerHTML = `<div class="rg">
-      <svg class="rg-svg" viewBox="0 0 200 200" aria-hidden="true"><g class="rg-ticks">${ticks}</g>
+      <svg class="rg-svg" viewBox="0 0 200 200" aria-hidden="true"><g class="rg-ticks">${ticksSvg(91, 93.5, 97)}</g>
         <circle class="rg-track" cx="100" cy="100" r="${R}"/>
         <circle class="rg-arc" cx="100" cy="100" r="${R}" transform="rotate(-90 100 100)" stroke-dasharray="0 ${CIRC}"/>
         <circle class="rg-dot" cx="100" cy="${100 - R}" r="5"/></svg>
@@ -1567,7 +1717,7 @@ function ringFace(el) {
       const l = o.label || '';
       if (label.textContent !== l) label.textContent = l;
       const p = clamp(o.progress ?? 0, 0, 1);
-      root.classList.toggle('jump', p < lastP - 0.02 || !o.animate); // no sweeping backwards
+      root.classList.toggle('jump', p < lastP - 0.02 || !o.animate);
       lastP = p;
       arc.setAttribute('stroke-dasharray', `${(p * CIRC).toFixed(2)} ${CIRC.toFixed(2)}`);
       const a = p * 2 * Math.PI;
@@ -1576,13 +1726,88 @@ function ringFace(el) {
       root.classList.toggle('empty', p <= 0);
     },
     fit({ W, H }) {
-      const m = metrics();
+      const m = env.m();
       const D = Math.min(W, H) * 0.97;
       const k = Math.max(1, n);
       const fs = Math.min((D * 0.64) / (k * len * m.w1 + (k - 1) * 0.36), (D * 0.27) / m.glyphH);
       px(el, '--rd', D);
       px(el, '--rfs', fs);
-      px(el, '--rls', Math.max(10, D * 0.05));
+      px(el, '--rls', Math.max(8, D * 0.05));
+    },
+  };
+}
+
+/* ---------- Analog: a watch dial ---------- */
+
+function analogFace(el) {
+  el.innerHTML = `<div class="an">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="an-face" cx="100" cy="100" r="97"/>
+        <circle class="an-rim" cx="100" cy="100" r="93"/>
+        <g class="an-ticks">${ticksSvg(80, 85, 90)}</g>
+        <g class="an-nums"></g>
+        <text class="an-label" x="100" y="66"></text>
+        <text class="an-digital" x="100" y="146"></text>
+        <g class="an-hand an-h"><rect x="96.5" y="50" width="7" height="56" rx="3.5"/></g>
+        <g class="an-hand an-m"><rect x="97.5" y="22" width="5" height="84" rx="2.5"/></g>
+        <g class="an-hand an-s"><line x1="100" y1="122" x2="100" y2="14"/><circle cx="100" cy="122" r="3.2"/></g>
+        <circle class="an-cap" cx="100" cy="100" r="4.2"/>
+      </svg>
+    </div>`;
+  const root = el.firstElementChild;
+  const nums = root.querySelector('.an-nums');
+  const digital = root.querySelector('.an-digital');
+  const label = root.querySelector('.an-label');
+  const [hh, mh, sh] = ['.an-h', '.an-m', '.an-s'].map((s) => root.querySelector(s));
+  let mode = '';
+  let n = 0;
+  let lastS = 0;
+  const setNums = (m) => {
+    mode = m;
+    const list = m === 'clock' ? [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] : [60, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55];
+    nums.innerHTML = list
+      .map((v, i) => {
+        const a = (i / 12) * 2 * Math.PI;
+        return `<text x="${(100 + 69 * Math.sin(a)).toFixed(2)}" y="${(100 - 69 * Math.cos(a)).toFixed(2)}">${v}</text>`;
+      })
+      .join('');
+    root.classList.toggle('timer', m === 'timer');
+  };
+  const rot = (g, deg) => (g.style.transform = `rotate(${deg.toFixed(2)}deg)`);
+  return {
+    get count() {
+      return n;
+    },
+    render(vals, o = {}) {
+      n = vals.length;
+      let h;
+      let m;
+      let s;
+      if (o.date) {
+        const d = o.date;
+        s = d.getSeconds() + d.getMilliseconds() / 1000;
+        m = d.getMinutes() + s / 60;
+        h = (d.getHours() % 12) + m / 60;
+        if (mode !== 'clock') setNums('clock');
+      } else {
+        const t = Math.max(0, (o.ms || 0) / 1000);
+        s = t % 60;
+        m = (t / 60) % 60;
+        h = null;
+        if (mode !== 'timer') setNums('timer');
+      }
+      root.classList.toggle('jump', s < lastS - 0.5 || !o.animate);
+      lastS = s;
+      rot(sh, s * 6);
+      rot(mh, m * 6);
+      if (h != null) rot(hh, h * 30);
+      const t = vals.join(':');
+      if (digital.textContent !== t) digital.textContent = t;
+      const l = o.label || '';
+      if (label.textContent !== l) label.textContent = l;
+    },
+    fit({ W, H }) {
+      px(el, '--ad', Math.min(W, H) * 0.97);
     },
   };
 }
@@ -1622,6 +1847,8 @@ const PATHS = {
   calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>',
   trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  palette: '<path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4.2 4H16a2 2 0 0 0-1.5 3.3c.6.8.1 2.7-2.5 2.7z"/><circle cx="7.5" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="11" cy="6.8" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.8" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   face: '<rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/><path d="M3 12h8M13 12h8"/>',
@@ -1716,7 +1943,45 @@ function sheet({ title, body = '', kind = 'sheet', cls = '', onClose }) {
   ov.addEventListener('click', (e) => {
     if (e.target.closest('[data-close]')) close(entry);
   });
+  if (kind === 'sheet') swipeToClose(ov, () => close(entry));
   return { el: ov, body: ov.querySelector('.panel-body'), close: () => close(entry) };
+}
+
+/** Drag a bottom sheet down by its handle or header to dismiss it. */
+function swipeToClose(ov, onClose) {
+  const panel = ov.querySelector('.panel');
+  const grabber = ov.querySelector('.grabber');
+  let y0 = null;
+  let dy = 0;
+  let t0 = 0;
+  for (const handle of ov.querySelectorAll('.grabber, .panel-head')) {
+    handle.style.touchAction = 'none';
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button') || getComputedStyle(grabber).display === 'none') return; // not on desktop dialogs
+      y0 = e.clientY;
+      dy = 0;
+      t0 = performance.now();
+      panel.style.transition = 'none';
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {}
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (y0 == null) return;
+      dy = Math.max(0, e.clientY - y0);
+      panel.style.transform = `translateY(${dy}px)`;
+    });
+    const end = () => {
+      if (y0 == null) return;
+      const fast = dy / Math.max(1, performance.now() - t0) > 0.6;
+      y0 = null;
+      panel.style.transition = '';
+      panel.style.transform = '';
+      if (dy > 110 || (fast && dy > 30)) onClose();
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
 }
 
 function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, primary: true }], dismissValue = null }) {
@@ -2709,12 +2974,15 @@ const sumDays = (from, to, now) => {
   return { total, active };
 };
 
-function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
+function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }) {
   root.innerHTML = `
     <section class="home-hero">
       <header class="hero-head">
         <div class="hero-when"><span class="greet"></span><span class="home-date"></span></div>
-        <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
+        <div class="topbar-right">
+          <button class="icon-btn" data-looks aria-label="Looks" title="Looks">${icon('palette')}</button>
+          <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
+        </div>
       </header>
       <div class="clock home-clock" role="timer" aria-label="Current time"></div>
       <div class="home-clock-sub"></div>
@@ -2730,6 +2998,7 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
   let face = makeFace(clockEl, data.settings.face);
   let minuteKey = '';
   let chartW = 0;
+  let introDone = false;
 
   function digits(now) {
     const d = new Date(now);
@@ -2997,6 +3266,11 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
     );
     drawCharts(now);
     header(now);
+    if (!introDone) {
+      introDone = true; // cards float in once, not on every refresh
+      bento.classList.add('intro');
+      setTimeout(() => bento.classList.remove('intro'), 1200);
+    }
   }
 
   function tick(now = Date.now(), animate = true) {
@@ -3005,7 +3279,7 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
     const countChanged = ds.length !== face.count;
     const d = new Date(now);
     const label = is24() ? d.toLocaleDateString([], { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
-    face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label });
+    face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label, date: d });
     if (countChanged) fit();
     const mk = `${d.getHours()}:${d.getMinutes()}`;
     if (mk !== minuteKey) {
@@ -3023,6 +3297,7 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
       return;
     }
     if (e.target.closest('[data-settings]')) return openSettings();
+    if (e.target.closest('[data-looks]')) return openLooks();
     const go = e.target.closest('[data-go]');
     if (go) return goTab(go.dataset.go);
     const s = e.target.closest('[data-sess]');
@@ -3085,12 +3360,109 @@ async function notify(title, body, sticky = false) {
 return { isStandalone, isIOS, canPromptInstall, promptInstall, initPWA, notify };
 })();
 
+// ---------- looks.js ----------
+__m.looks = (() => {
+// Templates: complete one-tap looks (style + theme + font + options), each shown as a
+// live preview in its own colours.
+const { data, saveSoon, emit } = __m.store;
+const { TEMPLATES, THEMES, LOOK_DEFAULTS, templateLook, fontById } = __m.config;
+const { makeFace } = __m.faces;
+const { sheet, icon, haptic, toast } = __m.ui;
+const { esc } = __m.util;
+
+const SAMPLE = { date: new Date(2020, 0, 1, 10, 9, 34), ms: 12 * 60000 + 34000 };
+
+function applyTemplate(id) {
+  const t = TEMPLATES.find((x) => x.id === id);
+  if (!t) return;
+  Object.assign(data.settings, LOOK_DEFAULTS, t.look, { template: id });
+  saveSoon();
+  emit('settings');
+}
+
+/** Buttons for every template; call drawTemplates(container) once they're in the page. */
+function templatesHtml() {
+  return `<div class="tpls">${TEMPLATES.map((t) => {
+    const look = templateLook(t);
+    const c = THEMES[look.theme] || THEMES.classic;
+    const f = fontById(look.font);
+    const vars = [
+      `--bg:${c.bg}`,
+      `--card:${c.card}`,
+      `--digit:${c.digit}`,
+      `--accent:${c.accent}`,
+      `--face:${look.faceColor !== 'auto' ? look.faceColor : 'initial'}`, // 'initial' = use the style's own colour
+      `--glow:${look.glow}`,
+      `--digit-font:${f.family}`,
+      `--digit-weight:${f.weight}`,
+      `--ls:${f.ls || 0}em`,
+    ]
+      .filter(Boolean)
+      .join(';');
+    const cls = ['tpl', 'themed', look.shade ? 'card-shade' : '', `bd-${look.backdrop}`].join(' ');
+    return `<button class="${cls}" data-tpl="${t.id}" aria-pressed="${data.settings.template === t.id}" style="${esc(vars)}">
+        <span class="clock tpl-mini"></span><span class="tpl-name">${esc(t.name)}</span></button>`;
+  }).join('')}</div>`;
+}
+
+/** Fills each template tile with a real mini clock and keeps it fitted. Returns a cleanup function. */
+function drawTemplates(container) {
+  const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
+  for (const tile of container.querySelectorAll('.tpl')) {
+    const t = TEMPLATES.find((x) => x.id === tile.dataset.tpl);
+    const look = templateLook(t);
+    const el = tile.querySelector('.tpl-mini');
+    el._face = makeFace(el, look.face, { font: look.font, settings: { ...data.settings, ...look } });
+    el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ...SAMPLE });
+    fitMini(el);
+    ro.observe(el);
+  }
+  const redraw = () => container.isConnected && container.querySelectorAll('.tpl-mini').forEach(fitMini);
+  document.fonts?.ready.then(redraw);
+  return () => ro.disconnect();
+}
+
+function markTemplates(container) {
+  container.querySelectorAll('.tpl').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tpl === data.settings.template)));
+}
+
+/** Quick picker from the clock screen. */
+function openLooks({ onCustomize } = {}) {
+  let cleanup = null;
+  const sh = sheet({
+    title: 'Looks',
+    cls: 'looks-sheet',
+    body: `${templatesHtml()}
+      <button class="btn block ghost" data-customize>${icon('settings')}<span>Customize further</span></button>`,
+    onClose: () => cleanup?.(),
+  });
+  cleanup = drawTemplates(sh.body);
+  sh.body.addEventListener('click', (e) => {
+    const tpl = e.target.closest('[data-tpl]');
+    if (tpl) {
+      haptic(8);
+      applyTemplate(tpl.dataset.tpl);
+      markTemplates(sh.body);
+      toast(`${tpl.querySelector('.tpl-name').textContent} applied`, { ms: 1800 });
+      return;
+    }
+    if (e.target.closest('[data-customize]')) {
+      sh.close();
+      setTimeout(() => onCustomize?.(), 340);
+    }
+  });
+}
+return { applyTemplate, templatesHtml, drawTemplates, markTemplates, openLooks };
+})();
+
 // ---------- settings.js ----------
 __m.settings = (() => {
-const { data, save, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } = __m.store;
-const { THEMES, FONTS, SOUNDS, APP_VERSION, themeColors, fontById } = __m.config;
-const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } = __m.ui;
+const { data, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } = __m.store;
+const { THEMES, FONTS, SOUNDS, APP_VERSION, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } = __m.config;
+const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog, haptic } = __m.ui;
 const { makeFace, FACES } = __m.faces;
+const { templatesHtml, drawTemplates, markTemplates, applyTemplate } = __m.looks;
 const engine = __m.engine;
 const audio = __m.audio;
 const pwa = __m.pwa;
@@ -3103,6 +3475,14 @@ const BG_SOUNDS = [
   ['pink', 'Pink noise'],
   ['white', 'White noise'],
   ['off', 'Off'],
+];
+
+const AREAS = [
+  ['looks', 'Looks'],
+  ['clock', 'Clock'],
+  ['timers', 'Timers'],
+  ['sound', 'Sound'],
+  ['data', 'Data'],
 ];
 
 const group = (title, inner, cls = '') =>
@@ -3124,10 +3504,15 @@ function hourLabel(h) {
   return new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' });
 }
 
-function openSettings() {
+let customizeOpen = false; // remembered while the app is open
+
+function openSettings({ customize = false } = {}) {
   let offFit = null;
   let iv = 0;
   let tileRO = null;
+  let tplCleanup = null;
+  let areaIO = null;
+  if (customize) customizeOpen = true;
   const pg = sheet({
     title: 'Settings',
     kind: 'page',
@@ -3136,9 +3521,14 @@ function openSettings() {
       offFit?.();
       clearInterval(iv);
       tileRO?.disconnect();
+      tplCleanup?.();
+      areaIO?.disconnect();
     },
   });
+  const scroller = pg.body;
   const root = pg.body.querySelector('.settings');
+
+  /* ---------- building blocks ---------- */
 
   const themeTile = (id, t, name) =>
     `<button class="theme-tile" data-theme="${id}" aria-pressed="${data.settings.theme === id}" style="--tb:${esc(t.bg)};--tc:${esc(t.card)};--td:${esc(t.digit)};--ta:${esc(t.accent)}">
@@ -3147,6 +3537,69 @@ function openSettings() {
   const fontTile = (f) =>
     `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
       <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
+
+  const swatches = () =>
+    `<div class="swatches sm">${FACE_COLORS.map(
+      ([v, n]) =>
+        `<button class="swatch${v === 'auto' ? ' auto' : ''}" data-fcolor="${v}" style="--c:${v === 'auto' ? 'transparent' : v}" title="${n}" aria-label="${n}" aria-pressed="${data.settings.faceColor === v}"></button>`
+    ).join('')}</div>`;
+
+  /** Options that only make sense for the chosen clock style. */
+  function styleOptionsHtml() {
+    const s = data.settings;
+    const name = (FACES.find(([id]) => id === s.face) || FACES[0])[1];
+    const colour = (label) => `<div class="row"><div class="row-label">${label}</div><div class="row-ctl wide">${swatches()}</div></div>`;
+    const glow = row('Glow', range('glow', 0, 1, 0.05, 'Glow'));
+    const blink = row('Blinking colon', switchEl('blink', s.blink !== false, 'Blinking colon'));
+    const ghost = (label) => row(label, switchEl('ghost', s.ghost !== false, label));
+    const ticks = row('Tick marks', switchEl('ticks', s.ticks !== false, 'Tick marks'));
+    const rows = {
+      flip:
+        row('Flip speed', segEl('flipSpeed', s.flipSpeed || 'normal', [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']], 'Flip speed')) +
+        row('Flip animation', switchEl('flip', s.flip !== false, 'Flip animation')) +
+        row('Card depth', switchEl('shade', !!s.shade, 'Card depth'), 'Soft light on the top half, shadow on the bottom') +
+        row('Hinge line', switchEl('hinge', s.hinge !== false, 'Hinge line')),
+      minimal: blink,
+      neon: colour('Tube colour') + glow + blink,
+      aurora: row('Palette', segEl('aurora', s.aurora || 'ocean', AURORAS, 'Aurora palette')) + blink,
+      led: colour('Segment colour') + glow + ghost('Show unlit segments') + blink,
+      dots: colour('Dot colour') + glow + ghost('Show unlit dots') + blink,
+      nixie: colour('Tube colour') + glow + ghost('Show unlit digits') + blink,
+      ring: colour('Ring colour') + ticks,
+      analog: colour('Second hand colour') + ticks,
+    };
+    return group(`${esc(name)} options`, rows[s.face] || rows.flip);
+  }
+
+  function customizeHtml() {
+    const s = data.settings;
+    const c = themeColors(s);
+    return `
+      ${group(
+        'Clock style',
+        `<div class="face-tiles">${FACES.map(
+          ([id, name]) =>
+            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
+        ).join('')}</div>`,
+        'pad'
+      )}
+      <div class="style-opts">${styleOptionsHtml()}</div>
+      ${group('Theme', `<div class="themes">${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}${themeTile('custom', s.custom, 'Custom')}</div>`, 'pad')}
+      ${group(
+        'Colours',
+        COLOR_ROWS.map(([k, label]) =>
+          row(label, `<label class="color-in" style="--c:${esc(c[k])}"><input type="color" data-color="${k}" value="${esc(c[k])}" aria-label="${label} colour"></label>`)
+        ).join('')
+      )}
+      ${group('Digit font', `<div class="fonts">${FONTS.map(fontTile).join('')}</div>`, 'pad')}
+      ${group(
+        'Details',
+        row('Digit size', range('digitScale', 0.8, 1.2, 0.01, 'Digit size')) +
+          row('Corner roundness', range('radius', 0, 0.25, 0.005, 'Corner roundness'), 'Flip cards') +
+          row('Background', segEl('backdrop', s.backdrop || 'none', [['none', 'None'], ['glow', 'Glow'], ['gradient', 'Gradient']], 'Background'), 'Soft light behind the clock') +
+          row('Tick sound', switchEl('tick', s.tick, 'Tick sound'), 'A soft click every second while running')
+      )}`;
+  }
 
   function notifCtl() {
     if (!('Notification' in window)) return '<span class="muted">Not supported</span>';
@@ -3164,122 +3617,103 @@ function openSettings() {
 
   function html() {
     const s = data.settings;
-    const c = themeColors(s);
     const p = s.pomo;
     return `
       <div class="preview"><div class="clock preview-clock"></div></div>
+      <nav class="set-nav" aria-label="Settings sections">${AREAS.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join('')}</nav>
 
-      ${group(
-        'Clock style',
-        `<div class="face-tiles">${FACES.map(
-          ([id, name]) =>
-            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
-        ).join('')}</div>`,
-        'pad'
-      )}
+      <div class="set-area area-looks" data-area="looks">
+        ${group('Templates', templatesHtml(), 'pad')}
+        <button class="btn block customize-toggle" aria-expanded="${customizeOpen}">${icon('palette')}<span>Customize further</span>${icon('chevronDown', 'chev')}</button>
+        <div class="customize"${customizeOpen ? '' : ' hidden'}>${customizeOpen ? customizeHtml() : ''}</div>
+      </div>
 
-      ${group('Theme', `<div class="themes">${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}${themeTile('custom', s.custom, 'Custom')}</div>`, 'pad')}
-      ${group(
-        'Colours',
-        COLOR_ROWS.map(([k, label]) =>
-          row(label, `<label class="color-in" style="--c:${esc(c[k])}"><input type="color" data-color="${k}" value="${esc(c[k])}" aria-label="${label} colour"></label>`)
-        ).join('')
-      )}
+      <div class="set-area" data-area="clock">
+        ${group(
+          'Display',
+          row('Show', segEl('format', s.format, [['auto', 'Auto'], ['hms', 'H M S'], ['hm', 'H M']], 'Digits shown'), 'Auto: minutes and seconds first, the hours join after an hour') +
+            row('Stopwatch shows', segEl('display', s.display, [['session', 'Session'], ['today', 'Today']], 'Stopwatch shows'), 'This session, or everything today in the category') +
+            row('Layout', segEl('layout', s.layout, [['auto', 'Auto'], ['row', 'Wide'], ['col', 'Tall']], 'Layout')) +
+            row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'The clock fills the screen. Tap anywhere for controls.')
+        )}
+        ${group('Home clock', row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds')))}
+      </div>
 
-      ${group('Digit font', `<div class="fonts">${FONTS.map(fontTile).join('')}</div>`, 'pad')}
-      ${group(
-        'Clock style',
-        row('Digit size', range('digitScale', 0.8, 1.2, 0.01, 'Digit size')) +
-          row('Corner roundness', range('radius', 0, 0.25, 0.005, 'Corner roundness')) +
-          row('Hinge line', switchEl('hinge', s.hinge, 'Hinge line')) +
-          row('Flip animation', switchEl('flip', s.flip, 'Flip animation')) +
-          row('Flip sound', switchEl('tick', s.tick, 'Flip sound'), 'A soft click each time a card flips')
-      )}
-
-      ${group(
-        'Display',
-        row('Show', segEl('format', s.format, [['auto', 'Auto'], ['hms', 'H M S'], ['hm', 'H M']], 'Digits shown'), 'Auto: minutes and seconds first, the hours card joins after an hour') +
-          row('Stopwatch shows', segEl('display', s.display, [['session', 'Session'], ['today', 'Today']], 'Stopwatch shows'), 'This session, or everything today in the category') +
-          row('Layout', segEl('layout', s.layout, [['auto', 'Auto'], ['row', 'Wide'], ['col', 'Tall']], 'Layout')) +
-          row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'Buttons hide and the cards fill the screen. Tap anywhere for options.')
-      )}
-
-      ${group(
-        'Screen off & background',
-        row(
-          'Keep running with screen off',
-          `<select class="select" data-key="bgSound" aria-label="Background sound">${BG_SOUNDS.map(([v, l]) => `<option value="${v}"${s.bgSound === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`,
-          'Plays a track the phone treats like music, so the clock keeps ticking, alarms ring on time and the lock screen shows play/pause. “Silent” can’t be heard. Other music apps may pause.'
-        ) +
-          row('Focus sound volume', range('ambientVol', 0.05, 1, 0.05, 'Focus sound volume'), 'For brown, pink and white noise') +
-          row('Keep screen on', switchEl('wakeLock', s.wakeLock, 'Keep screen on'), 'While a clock is running and the app is open')
-      )}
-
-      ${group(
-        'Home clock',
-        row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds'))
-      )}
-
-      ${group(
-        'Pomodoro',
-        row('Focus', stepperEl('pomo.focus', p.focus, { min: 1, max: 180, unit: 'min' }, 'focus')) +
-          row('Short break', stepperEl('pomo.short', p.short, { min: 1, max: 60, unit: 'min' }, 'short break')) +
-          row('Long break', stepperEl('pomo.long', p.long, { min: 1, max: 90, unit: 'min' }, 'long break')) +
-          row('Long break every', stepperEl('pomo.every', p.every, { min: 2, max: 12, unit: 'rounds' }, 'rounds')) +
-          row('Auto-start breaks', switchEl('pomo.autoBreak', p.autoBreak, 'Auto-start breaks')) +
-          row('Auto-start focus', switchEl('pomo.autoFocus', p.autoFocus, 'Auto-start focus'))
-      )}
-
-      ${group(
-        'Alerts',
-        row(
-          'Alarm sound',
-          `<div class="inline"><select class="select" data-key="sound" aria-label="Alarm sound">${SOUNDS.map(([v, l]) => `<option value="${v}"${s.sound === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
-           <button class="icon-btn" data-test-sound aria-label="Play sound">${icon('sound')}</button></div>`
-        ) +
-          row('Volume', range('volume', 0, 1, 0.05, 'Volume')) +
-          row('Vibration', switchEl('vibrate', s.vibrate, 'Vibration')) +
-          row('Notifications', `<span data-notif-slot>${notifCtl()}</span>`, 'Alert when a timer ends while the app is in the background')
-      )}
-
-      ${group(
-        'Tracking',
-        row('Daily goal (all)', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Auto adds up your category goals') +
-          row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
+      <div class="set-area" data-area="timers">
+        ${group(
+          'Pomodoro',
+          row('Focus', stepperEl('pomo.focus', p.focus, { min: 1, max: 180, unit: 'min' }, 'focus')) +
+            row('Short break', stepperEl('pomo.short', p.short, { min: 1, max: 60, unit: 'min' }, 'short break')) +
+            row('Long break', stepperEl('pomo.long', p.long, { min: 1, max: 90, unit: 'min' }, 'long break')) +
+            row('Long break every', stepperEl('pomo.every', p.every, { min: 2, max: 12, unit: 'rounds' }, 'rounds')) +
+            row('Auto-start breaks', switchEl('pomo.autoBreak', p.autoBreak, 'Auto-start breaks')) +
+            row('Auto-start focus', switchEl('pomo.autoFocus', p.autoFocus, 'Auto-start focus'))
+        )}
+        ${group(
+          'Screen off & background',
           row(
-            'New day starts at',
-            `<select class="select" data-key="dayStart" aria-label="New day starts at">${[0, 1, 2, 3, 4, 5, 6].map((h) => `<option value="${h}"${s.dayStart === h ? ' selected' : ''}>${hourLabel(h)}</option>`).join('')}</select>`,
-            'Late-night study counts toward the previous day'
+            'Keep running with screen off',
+            `<select class="select" data-key="bgSound" aria-label="Background sound">${BG_SOUNDS.map(([v, l]) => `<option value="${v}"${s.bgSound === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`,
+            'Plays a track the phone treats like music, so the clock keeps ticking, alarms ring on time and the lock screen shows play/pause. “Silent” can’t be heard. Other music apps may pause.'
           ) +
-          row('Keep sessions longer than', segEl('minSave', s.minSave, [[0, 'Any'], [30, '30s'], [60, '1m'], [300, '5m']], 'Minimum session'))
-      )}
+            row('Focus sound volume', range('ambientVol', 0.05, 1, 0.05, 'Focus sound volume'), 'For brown, pink and white noise') +
+            row('Keep screen on', switchEl('wakeLock', s.wakeLock, 'Keep screen on'), 'While a clock is running and the app is open')
+        )}
+      </div>
 
-      ${group(
-        'Your data',
-        `<div class="data-btns">
-          <button class="btn" data-export>${icon('download')}<span>Back up</span></button>
-          <button class="btn" data-import>${icon('upload')}<span>Restore</span></button>
-          <button class="btn" data-csv>${icon('download')}<span>Export CSV</span></button>
-          <button class="btn danger" data-erase>${icon('trash')}<span>Erase all</span></button>
-        </div>
-        <p class="hint small">Everything is stored on this device only. Back up now and then, or before switching phones.</p>
-        <input type="file" accept="application/json,.json" data-file hidden>`,
-        'pad'
-      )}
+      <div class="set-area" data-area="sound">
+        ${group(
+          'Alerts',
+          row(
+            'Alarm sound',
+            `<div class="inline"><select class="select" data-key="sound" aria-label="Alarm sound">${SOUNDS.map(([v, l]) => `<option value="${v}"${s.sound === v ? ' selected' : ''}>${l}</option>`).join('')}</select>
+             <button class="icon-btn" data-test-sound aria-label="Play sound">${icon('sound')}</button></div>`
+          ) +
+            row('Volume', range('volume', 0, 1, 0.05, 'Volume')) +
+            row('Vibration', switchEl('vibrate', s.vibrate, 'Vibration')) +
+            row('Notifications', `<span data-notif-slot>${notifCtl()}</span>`, 'Alert when a timer ends while the app is in the background')
+        )}
+      </div>
 
-      ${group('App', installRow() + row('Privacy', '<a class="btn sm" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>', 'Your data stays on this device') + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
-      <p class="footnote">Keys: 1–5 switch tabs · Space start/pause · R reset · E edit</p>`;
+      <div class="set-area" data-area="data">
+        ${group(
+          'Tracking',
+          row('Daily goal (all)', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Auto adds up your category goals') +
+            row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
+            row(
+              'New day starts at',
+              `<select class="select" data-key="dayStart" aria-label="New day starts at">${[0, 1, 2, 3, 4, 5, 6].map((h) => `<option value="${h}"${s.dayStart === h ? ' selected' : ''}>${hourLabel(h)}</option>`).join('')}</select>`,
+              'Late-night study counts toward the previous day'
+            ) +
+            row('Keep sessions longer than', segEl('minSave', s.minSave, [[0, 'Any'], [30, '30s'], [60, '1m'], [300, '5m']], 'Minimum session'))
+        )}
+        ${group(
+          'Your data',
+          `<div class="data-btns">
+            <button class="btn" data-export>${icon('download')}<span>Back up</span></button>
+            <button class="btn" data-import>${icon('upload')}<span>Restore</span></button>
+            <button class="btn" data-csv>${icon('download')}<span>Export CSV</span></button>
+            <button class="btn danger" data-erase>${icon('trash')}<span>Erase all</span></button>
+          </div>
+          <p class="hint small">Everything is stored on this device only. Back up now and then, or before switching phones.</p>
+          <input type="file" accept="application/json,.json" data-file hidden>`,
+          'pad'
+        )}
+        ${group('App', installRow() + row('Privacy', '<a class="btn sm" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>', 'Your data stays on this device') + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
+        <p class="footnote">Keys: 1–5 switch tabs · Space start/pause · R reset · E edit · F full screen</p>
+      </div>`;
   }
 
-  /* ---------- live preview ---------- */
+  /* ---------- live previews ---------- */
 
   function mountPreview() {
     const el = root.querySelector('.preview-clock');
     let face = null;
     const size = () => {
       const W = Math.min(el.parentElement.clientWidth, 420);
+      const round = face && ['ring', 'analog'].includes(face.type);
       el.style.width = `${W}px`;
-      el.style.height = `${Math.round(W * (face?.type === 'ring' ? 0.62 : 0.44))}px`;
+      el.style.height = `${Math.round(W * (round ? 0.62 : 0.44))}px`;
       face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
     };
     const draw = (animate) => {
@@ -3291,18 +3725,16 @@ function openSettings() {
       }
       const ms = engine.displayMs();
       const [, m, sec] = hms(ms, engine.isCountdown());
-      face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview' });
+      face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview', ms });
     };
     draw(false);
     clearInterval(iv);
-    iv = setInterval(() => draw(true), 250);
+    iv = setInterval(() => draw(true), 200);
     offFit?.();
     offFit = on('fit', () => {
       size();
-      drawFaceTiles(); // re-measure once web fonts have loaded
+      drawFaceTiles();
     });
-    drawFaceTiles();
-    document.fonts?.ready.then(() => root.isConnected && drawFaceTiles());
   }
 
   /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
@@ -3313,15 +3745,46 @@ function openSettings() {
     for (const tile of root.querySelectorAll('.face-tile')) {
       const el = tile.querySelector('.face-mini');
       el._face = makeFace(el, tile.dataset.face);
-      el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '' });
+      el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
       fitMini(el);
       tileRO.observe(el);
     }
   }
 
+  function renderCustomize() {
+    const box = root.querySelector('.customize');
+    if (!customizeOpen) {
+      box.hidden = true;
+      return;
+    }
+    box.innerHTML = customizeHtml();
+    box.hidden = false;
+    drawFaceTiles();
+  }
+
   function render() {
     root.innerHTML = html();
     mountPreview();
+    tplCleanup?.();
+    tplCleanup = drawTemplates(root.querySelector('.area-looks'));
+    if (customizeOpen) drawFaceTiles();
+    watchAreas();
+  }
+
+  /** Highlight the section you're reading in the sticky bar. */
+  function watchAreas() {
+    areaIO?.disconnect();
+    const nav = root.querySelector('.set-nav');
+    const mark = (id) => nav.querySelectorAll('[data-jump]').forEach((b) => b.setAttribute('aria-current', String(b.dataset.jump === id)));
+    mark('looks');
+    areaIO = new IntersectionObserver(
+      (entries) => {
+        const vis = entries.filter((e) => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+        if (vis) mark(vis.target.dataset.area);
+      },
+      { root: scroller, rootMargin: '-80px 0px -60% 0px' }
+    );
+    root.querySelectorAll('.set-area').forEach((a) => areaIO.observe(a));
   }
 
   function refreshThemeUI() {
@@ -3329,12 +3792,18 @@ function openSettings() {
     const c = themeColors(s);
     root.querySelectorAll('.theme-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === s.theme)));
     const custom = root.querySelector('.theme-tile[data-theme="custom"]');
-    for (const [k, v] of Object.entries({ tb: s.custom.bg, tc: s.custom.card, td: s.custom.digit, ta: s.custom.accent })) custom.style.setProperty(`--${k}`, v);
+    if (custom) for (const [k, v] of Object.entries({ tb: s.custom.bg, tc: s.custom.card, td: s.custom.digit, ta: s.custom.accent })) custom.style.setProperty(`--${k}`, v);
     root.querySelectorAll('input[data-color]').forEach((inp) => {
       inp.value = c[inp.dataset.color];
       inp.parentElement.style.setProperty('--c', c[inp.dataset.color]);
     });
   }
+
+  /** Any hand-made change to the look means it's no longer an untouched template. */
+  const lookChanged = () => {
+    data.settings.template = null;
+    markTemplates(root);
+  };
 
   const changed = () => {
     saveSoon();
@@ -3345,6 +3814,7 @@ function openSettings() {
     get: (k) => getPath(data.settings, k),
     set: (k, v) => {
       setPath(data.settings, k, v);
+      if (LOOK_KEYS.has(k)) lookChanged();
       if (k.startsWith('pomo.')) engine.syncIdle();
       if (k === 'sound') audio.playSound(v);
       changed();
@@ -3358,6 +3828,7 @@ function openSettings() {
       const s = data.settings;
       s.custom = { ...themeColors(s), [t.dataset.color]: t.value };
       s.theme = 'custom';
+      lookChanged();
       refreshThemeUI();
       changed();
     }
@@ -3369,21 +3840,54 @@ function openSettings() {
 
   root.addEventListener('click', async (e) => {
     const s = data.settings;
+    const jump = e.target.closest('[data-jump]');
+    if (jump) {
+      const area = root.querySelector(`[data-area="${jump.dataset.jump}"]`);
+      area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    const tpl = e.target.closest('[data-tpl]');
+    if (tpl) {
+      haptic(8);
+      applyTemplate(tpl.dataset.tpl);
+      markTemplates(root);
+      if (customizeOpen) renderCustomize();
+      return;
+    }
+    const tog = e.target.closest('.customize-toggle');
+    if (tog) {
+      customizeOpen = !customizeOpen;
+      tog.setAttribute('aria-expanded', String(customizeOpen));
+      renderCustomize();
+      if (customizeOpen) setTimeout(() => tog.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
+      return;
+    }
     const th = e.target.closest('[data-theme]');
     if (th) {
       s.theme = th.dataset.theme;
+      lookChanged();
       refreshThemeUI();
       return changed();
     }
     const fc = e.target.closest('.face-tile');
     if (fc) {
       s.face = fc.dataset.face;
+      lookChanged();
       root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
+      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
+      return changed();
+    }
+    const col = e.target.closest('[data-fcolor]');
+    if (col) {
+      s.faceColor = col.dataset.fcolor;
+      lookChanged();
+      col.parentElement.querySelectorAll('[data-fcolor]').forEach((b) => b.setAttribute('aria-pressed', String(b === col)));
       return changed();
     }
     const ft = e.target.closest('[data-font]');
     if (ft) {
       s.font = ft.dataset.font;
+      lookChanged();
       root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === ft)));
       return changed();
     }
@@ -3470,6 +3974,7 @@ function openSettings() {
   }
 
   render();
+  if (customize) setTimeout(() => root.querySelector('.customize-toggle')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 380);
 }
 return { openSettings };
 })();
@@ -3489,6 +3994,7 @@ const { openEditor, openCategories } = __m.sheets;
 const { mountStats } = __m.stats;
 const { mountHome } = __m.home;
 const { openSettings } = __m.settings;
+const { openLooks } = __m.looks;
 const { initPWA, notify } = __m.pwa;
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
@@ -3507,11 +4013,12 @@ let face = makeFace(clockEl, data.settings.face);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let metrics = null;
 let tab = 'home';
+let started = false; // no transitions during the first paint
 const isModeTab = (t = tab) => engine.MODES.includes(t);
 
 for (const el of $$('[data-icon]')) el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon));
 
-const home = mountHome($('.view-home'), { goTab: showTab, openSettings, togglePlay, visible: () => tab === 'home' });
+const home = mountHome($('.view-home'), { goTab: showTab, openSettings: () => openSettings(), openLooks: () => showLooks(), togglePlay, visible: () => tab === 'home' });
 const stats = mountStats($('.view-stats .stats'), { visible: () => tab === 'stats' });
 
 /* ---------- appearance ---------- */
@@ -3573,12 +4080,27 @@ function fit() {
   emit('fit');
 }
 
+/** Style options live on <html> so the clock, Home and Settings previews all pick them up. */
+function applyLook() {
+  const s = S();
+  const html = document.documentElement;
+  if (s.faceColor && s.faceColor !== 'auto') html.style.setProperty('--face', s.faceColor);
+  else html.style.removeProperty('--face');
+  html.style.setProperty('--glow', String(s.glow ?? 0.6));
+  html.classList.toggle('no-ghost', s.ghost === false);
+  html.classList.toggle('no-ticks', s.ticks === false);
+  html.classList.toggle('no-blink', s.blink === false);
+  html.classList.toggle('card-shade', !!s.shade);
+  for (const b of ['glow', 'gradient']) html.classList.toggle(`bd-${b}`, s.backdrop === b);
+}
+
 function applyAll() {
   if (face.type !== S().face) {
     face = makeFace(clockEl, S().face);
     lastDigits = '';
   }
   applyTheme();
+  applyLook();
   document.body.classList.toggle('no-hinge', !S().hinge);
   audio.setVolume(S().volume);
   applyFont();
@@ -3590,7 +4112,14 @@ function applyAll() {
 
 /* ---------- tabs ---------- */
 
+/** Tab changes cross-fade where the browser supports view transitions. */
 function showTab(t) {
+  const animate = started && t !== tab && document.startViewTransition && !reduceMotion.matches && !document.hidden;
+  if (animate) document.startViewTransition(() => swapTab(t));
+  else swapTab(t);
+}
+
+function swapTab(t) {
   if (!TABS.includes(t)) t = 'home';
   tab = t;
   if (isModeTab(t)) engine.setView(t);
@@ -3670,7 +4199,7 @@ function renderClock(now, force) {
   const prog = m === 'stopwatch' ? (engine.elapsed(m, now) % MIN) / MIN : r.dur ? engine.remaining(m, now) / r.dur : 0;
   const cat = catById(engine.current(m)?.cat || currentCat().id);
   const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.name;
-  face.render(digits, { animate, running, progress: prog, label });
+  face.render(digits, { animate, running, progress: prog, label, ms: engine.displayMs(m, now) });
   if (countChanged) fitClock();
   const joined = `${m}|${digits.join(':')}`;
   if (!force && joined !== lastDigits && S().tick && running && !document.hidden) audio.tick();
@@ -3827,7 +4356,13 @@ skipBtn.addEventListener('click', () => {
   toast(`${engine.phaseName()}${res.session && res.kept ? ` · saved ${fmtDur(sessionDur(res.session))}` : ''}`);
 });
 $('#btn-cat').addEventListener('click', openCategories);
-for (const b of $$('[data-open-settings]')) b.addEventListener('click', openSettings);
+for (const b of $$('[data-open-settings]')) b.addEventListener('click', () => openSettings());
+for (const b of $$('[data-open-looks]')) b.addEventListener('click', showLooks);
+
+function showLooks() {
+  haptic(6);
+  openLooks({ onCustomize: () => openSettings({ customize: true }) });
+}
 
 document.addEventListener('keydown', (e) => {
   if (overlayOpen() || e.target.closest('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -4032,13 +4567,22 @@ if (!TABS.includes(startTab)) {
 applyTheme();
 showTab(startTab);
 applyAll();
+// From now on theme colours fade instead of snapping (after the first paint, so launch doesn't fade in).
+setTimeout(() => {
+  document.documentElement.classList.add('theme-anim');
+  started = true;
+}, 120);
 // Demo only (store screenshots): ?demo&scroll opens Home scrolled to the dashboard.
 if (DEMO && new URLSearchParams(location.search).has('scroll')) {
   setTimeout(() => ($('.view-home').scrollTop = $('.home-bento').offsetTop - 14), 400);
 }
 // Demo only: ?demo&tap shows the full-screen controls once full screen has kicked in.
 if (DEMO && new URLSearchParams(location.search).has('tap')) setTimeout(() => isFull() && showOverlay(true), 5500);
-if (DEMO && new URLSearchParams(location.search).has('settings')) setTimeout(openSettings, 300);
+if (DEMO) {
+  const q = new URLSearchParams(location.search);
+  if (q.has('settings')) setTimeout(() => openSettings({ customize: q.has('customize') }), 300);
+  if (q.has('looks')) setTimeout(showLooks, 300);
+}
 setInterval(frame, 150);
 initPWA();
 return {  };

@@ -6,7 +6,17 @@ const KEY = 'focus.v1';
 export const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
-  face: 'flip', // flip | minimal | led | nixie | ring
+  face: 'flip', // see FACES in faces.js
+  template: 'classic', // last template applied; null once you customise
+  faceColor: 'auto',
+  glow: 0.6,
+  ghost: true,
+  ticks: true,
+  blink: true,
+  flipSpeed: 'normal',
+  shade: false,
+  backdrop: 'none',
+  aurora: 'ocean',
   font: 'barlow',
   digitScale: 1,
   radius: 0.09,

@@ -24,6 +24,7 @@
     { "src": "store/screenshot-2-fullscreen.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Full-screen stopwatch" },
     { "src": "store/screenshot-3-dashboard.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Goals, streaks and consistency" },
     { "src": "store/screenshot-4-stats.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Statistics by day, week, month and year" },
+    { "src": "store/screenshot-5-looks.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "16 ready-made looks and 9 clock styles" },
     { "src": "store/screenshot-wide.png", "sizes": "1920x1080", "type": "image/png", "form_factor": "wide", "label": "Focus on a big screen" }
   ],
   "shortcuts": [

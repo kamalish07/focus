@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.5.0';
+export const APP_VERSION = '1.6.0';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 export const THEMES = {
@@ -44,3 +44,67 @@ export const SOUNDS = [
 ];
 
 export const TIMER_PRESETS = [5, 10, 15, 20, 25, 30, 45, 60, 90, 120];
+
+/** Every setting that belongs to "the look". A template resets all of these, then applies its own. */
+export const LOOK_DEFAULTS = {
+  theme: 'classic',
+  face: 'flip',
+  font: 'barlow',
+  faceColor: 'auto', // or a hex colour; "auto" = each style's own colour
+  glow: 0.6,
+  ghost: true, // show unlit LED segments / dots / nixie cathodes
+  ticks: true, // tick marks on Ring and Analog
+  blink: true, // blinking colon
+  flipSpeed: 'normal',
+  shade: false, // card depth shading on Flip
+  backdrop: 'none', // none | glow | gradient
+  aurora: 'ocean',
+  digitScale: 1,
+  radius: 0.09,
+  hinge: true,
+  flip: true,
+};
+export const LOOK_KEYS = new Set([...Object.keys(LOOK_DEFAULTS), 'custom']);
+
+export const FACE_COLORS = [
+  ['auto', 'Auto'],
+  ['#d4e157', 'Lime'],
+  ['#ff5a4f', 'Red'],
+  ['#ff9a3c', 'Orange'],
+  ['#ffd166', 'Yellow'],
+  ['#4ade80', 'Green'],
+  ['#22d3ee', 'Cyan'],
+  ['#60a5fa', 'Blue'],
+  ['#a78bfa', 'Violet'],
+  ['#f472b6', 'Pink'],
+  ['#f5f5f5', 'White'],
+];
+
+export const AURORAS = [
+  ['ocean', 'Ocean'],
+  ['sunset', 'Sunset'],
+  ['forest', 'Forest'],
+  ['berry', 'Berry'],
+];
+
+/** One-tap looks. Anything not listed falls back to LOOK_DEFAULTS. */
+export const TEMPLATES = [
+  { id: 'classic', name: 'Classic Flip', look: {} },
+  { id: 'paper', name: 'Paper Flip', look: { theme: 'paper', shade: true } },
+  { id: 'nixie', name: 'Retro Nixie', look: { theme: 'amber', face: 'nixie', backdrop: 'glow' } },
+  { id: 'neon', name: 'Neon Night', look: { theme: 'midnight', face: 'neon', font: 'fredoka', faceColor: '#f472b6', glow: 0.8, backdrop: 'glow' } },
+  { id: 'aurora', name: 'Aurora', look: { theme: 'midnight', face: 'aurora', font: 'rubik', aurora: 'ocean', backdrop: 'gradient' } },
+  { id: 'bedside', name: 'Bedside LED', look: { theme: 'crimson', face: 'led', faceColor: '#ff5a4f', glow: 0.8 } },
+  { id: 'arcade', name: 'Arcade', look: { theme: 'ocean', face: 'dots', faceColor: '#22d3ee', glow: 0.8, backdrop: 'glow' } },
+  { id: 'zen', name: 'Zen Ring', look: { theme: 'mist', face: 'ring', font: 'rubik' } },
+  { id: 'watch', name: 'Wristwatch', look: { theme: 'paper', face: 'analog', font: 'serif' } },
+  { id: 'nightwatch', name: 'Night Watch', look: { theme: 'graphite', face: 'analog', faceColor: '#ff9a3c' } },
+  { id: 'mint', name: 'Mint LED', look: { theme: 'forest', face: 'led', faceColor: '#4ade80' } },
+  { id: 'sunset', name: 'Sunset', look: { theme: 'rose', face: 'aurora', font: 'fredoka', aurora: 'sunset', backdrop: 'glow' } },
+  { id: 'mono', name: 'Mono', look: { theme: 'graphite', face: 'minimal', font: 'mono' } },
+  { id: 'terminal', name: 'Terminal', look: { theme: 'forest', face: 'minimal', font: 'pixel' } },
+  { id: 'poster', name: 'Poster', look: { theme: 'classic', face: 'minimal', font: 'bebas' } },
+  { id: 'ice', name: 'Ice Nixie', look: { theme: 'ocean', face: 'nixie', faceColor: '#60a5fa', backdrop: 'glow' } },
+];
+
+export const templateLook = (t) => ({ ...LOOK_DEFAULTS, ...t.look });

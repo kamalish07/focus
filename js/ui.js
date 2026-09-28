@@ -29,6 +29,8 @@ const PATHS = {
   calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>',
   trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  palette: '<path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4.2 4H16a2 2 0 0 0-1.5 3.3c.6.8.1 2.7-2.5 2.7z"/><circle cx="7.5" cy="10.5" r="1.3" fill="currentColor" stroke="none"/><circle cx="11" cy="6.8" r="1.3" fill="currentColor" stroke="none"/><circle cx="15.8" cy="8" r="1.3" fill="currentColor" stroke="none"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   face: '<rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/><path d="M3 12h8M13 12h8"/>',
@@ -123,7 +125,45 @@ export function sheet({ title, body = '', kind = 'sheet', cls = '', onClose }) {
   ov.addEventListener('click', (e) => {
     if (e.target.closest('[data-close]')) close(entry);
   });
+  if (kind === 'sheet') swipeToClose(ov, () => close(entry));
   return { el: ov, body: ov.querySelector('.panel-body'), close: () => close(entry) };
+}
+
+/** Drag a bottom sheet down by its handle or header to dismiss it. */
+function swipeToClose(ov, onClose) {
+  const panel = ov.querySelector('.panel');
+  const grabber = ov.querySelector('.grabber');
+  let y0 = null;
+  let dy = 0;
+  let t0 = 0;
+  for (const handle of ov.querySelectorAll('.grabber, .panel-head')) {
+    handle.style.touchAction = 'none';
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button') || getComputedStyle(grabber).display === 'none') return; // not on desktop dialogs
+      y0 = e.clientY;
+      dy = 0;
+      t0 = performance.now();
+      panel.style.transition = 'none';
+      try {
+        handle.setPointerCapture(e.pointerId);
+      } catch {}
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (y0 == null) return;
+      dy = Math.max(0, e.clientY - y0);
+      panel.style.transform = `translateY(${dy}px)`;
+    });
+    const end = () => {
+      if (y0 == null) return;
+      const fast = dy / Math.max(1, performance.now() - t0) > 0.6;
+      y0 = null;
+      panel.style.transition = '';
+      panel.style.transform = '';
+      if (dy > 110 || (fast && dy > 30)) onClose();
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
 }
 
 export function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, primary: true }], dismissValue = null }) {

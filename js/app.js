@@ -11,6 +11,7 @@ import { openEditor, openCategories } from './sheets.js';
 import { mountStats } from './stats.js';
 import { mountHome } from './home.js';
 import { openSettings } from './settings.js';
+import { openLooks } from './looks.js';
 import { initPWA, notify } from './pwa.js';
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
@@ -29,11 +30,12 @@ let face = makeFace(clockEl, data.settings.face);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let metrics = null;
 let tab = 'home';
+let started = false; // no transitions during the first paint
 const isModeTab = (t = tab) => engine.MODES.includes(t);
 
 for (const el of $$('[data-icon]')) el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon));
 
-const home = mountHome($('.view-home'), { goTab: showTab, openSettings, togglePlay, visible: () => tab === 'home' });
+const home = mountHome($('.view-home'), { goTab: showTab, openSettings: () => openSettings(), openLooks: () => showLooks(), togglePlay, visible: () => tab === 'home' });
 const stats = mountStats($('.view-stats .stats'), { visible: () => tab === 'stats' });
 
 /* ---------- appearance ---------- */
@@ -95,12 +97,27 @@ function fit() {
   emit('fit');
 }
 
+/** Style options live on <html> so the clock, Home and Settings previews all pick them up. */
+function applyLook() {
+  const s = S();
+  const html = document.documentElement;
+  if (s.faceColor && s.faceColor !== 'auto') html.style.setProperty('--face', s.faceColor);
+  else html.style.removeProperty('--face');
+  html.style.setProperty('--glow', String(s.glow ?? 0.6));
+  html.classList.toggle('no-ghost', s.ghost === false);
+  html.classList.toggle('no-ticks', s.ticks === false);
+  html.classList.toggle('no-blink', s.blink === false);
+  html.classList.toggle('card-shade', !!s.shade);
+  for (const b of ['glow', 'gradient']) html.classList.toggle(`bd-${b}`, s.backdrop === b);
+}
+
 function applyAll() {
   if (face.type !== S().face) {
     face = makeFace(clockEl, S().face);
     lastDigits = '';
   }
   applyTheme();
+  applyLook();
   document.body.classList.toggle('no-hinge', !S().hinge);
   audio.setVolume(S().volume);
   applyFont();
@@ -112,7 +129,14 @@ function applyAll() {
 
 /* ---------- tabs ---------- */
 
+/** Tab changes cross-fade where the browser supports view transitions. */
 function showTab(t) {
+  const animate = started && t !== tab && document.startViewTransition && !reduceMotion.matches && !document.hidden;
+  if (animate) document.startViewTransition(() => swapTab(t));
+  else swapTab(t);
+}
+
+function swapTab(t) {
   if (!TABS.includes(t)) t = 'home';
   tab = t;
   if (isModeTab(t)) engine.setView(t);
@@ -192,7 +216,7 @@ function renderClock(now, force) {
   const prog = m === 'stopwatch' ? (engine.elapsed(m, now) % MIN) / MIN : r.dur ? engine.remaining(m, now) / r.dur : 0;
   const cat = catById(engine.current(m)?.cat || currentCat().id);
   const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.name;
-  face.render(digits, { animate, running, progress: prog, label });
+  face.render(digits, { animate, running, progress: prog, label, ms: engine.displayMs(m, now) });
   if (countChanged) fitClock();
   const joined = `${m}|${digits.join(':')}`;
   if (!force && joined !== lastDigits && S().tick && running && !document.hidden) audio.tick();
@@ -349,7 +373,13 @@ skipBtn.addEventListener('click', () => {
   toast(`${engine.phaseName()}${res.session && res.kept ? ` · saved ${fmtDur(sessionDur(res.session))}` : ''}`);
 });
 $('#btn-cat').addEventListener('click', openCategories);
-for (const b of $$('[data-open-settings]')) b.addEventListener('click', openSettings);
+for (const b of $$('[data-open-settings]')) b.addEventListener('click', () => openSettings());
+for (const b of $$('[data-open-looks]')) b.addEventListener('click', showLooks);
+
+function showLooks() {
+  haptic(6);
+  openLooks({ onCustomize: () => openSettings({ customize: true }) });
+}
 
 document.addEventListener('keydown', (e) => {
   if (overlayOpen() || e.target.closest('input, textarea, select') || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -554,12 +584,21 @@ if (!TABS.includes(startTab)) {
 applyTheme();
 showTab(startTab);
 applyAll();
+// From now on theme colours fade instead of snapping (after the first paint, so launch doesn't fade in).
+setTimeout(() => {
+  document.documentElement.classList.add('theme-anim');
+  started = true;
+}, 120);
 // Demo only (store screenshots): ?demo&scroll opens Home scrolled to the dashboard.
 if (DEMO && new URLSearchParams(location.search).has('scroll')) {
   setTimeout(() => ($('.view-home').scrollTop = $('.home-bento').offsetTop - 14), 400);
 }
 // Demo only: ?demo&tap shows the full-screen controls once full screen has kicked in.
 if (DEMO && new URLSearchParams(location.search).has('tap')) setTimeout(() => isFull() && showOverlay(true), 5500);
-if (DEMO && new URLSearchParams(location.search).has('settings')) setTimeout(openSettings, 300);
+if (DEMO) {
+  const q = new URLSearchParams(location.search);
+  if (q.has('settings')) setTimeout(() => openSettings({ customize: q.has('customize') }), 300);
+  if (q.has('looks')) setTimeout(showLooks, 300);
+}
 setInterval(frame, 150);
 initPWA();

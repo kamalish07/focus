@@ -16,7 +16,7 @@ Focus turns your phone into a beautiful split-flap clock that keeps you studying
 • Pomodoro – focus and break cycles with auto-start, long breaks and round tracking.
 
 🔳 A CLOCK THAT FILLS THE SCREEN
-Choose from five clock styles: Flip (a real split-flap animation), Minimal, LED seven-segment, glowing Nixie tubes or a progress Ring. After a few seconds the buttons slide away and the clock covers the whole screen, upright or sideways. Tap anywhere for floating controls.
+Nine clock styles: Flip (a real split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix, Nixie tubes, Ring and a classic Analog dial. Start from 16 ready-made looks like Retro Nixie, Neon Night, Bedside LED or Wristwatch, then customise colours, glow, fonts and more. After a few seconds the buttons slide away and the clock covers the whole screen, upright or sideways. Tap anywhere for floating controls.
 
 📊 SEE YOUR PROGRESS
 • Daily goals per subject with progress rings
@@ -44,7 +44,7 @@ No account, no ads, no tracking. Everything stays on your phone. Back up or expo
 |---|---|
 | App icon (512 × 512) | `play-icon-512.png` |
 | Feature graphic (1024 × 500) | `feature-graphic-1024x500.png` |
-| Phone screenshots (1080 × 1920) | `screenshot-1-home.png`, `screenshot-2-fullscreen.png`, `screenshot-3-dashboard.png`, `screenshot-4-stats.png` |
+| Phone screenshots (1080 × 1920) | `screenshot-1-home.png`, `screenshot-2-fullscreen.png`, `screenshot-3-dashboard.png`, `screenshot-4-stats.png`, `screenshot-5-looks.png` |
 | Tablet / Chromebook screenshot | `screenshot-wide.png` |
 
 ## App content answers

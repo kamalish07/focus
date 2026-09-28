@@ -1,0 +1,194 @@
+/* Extra clock faces, templates and look options. Loaded after styles.css. */
+
+/* ============ Neon: glowing outline tubes ============ */
+/* Hollow letters with a bright tube outline; the glow is traced from the outline only (drop-shadow),
+   so the inside of each digit stays dark like real bent-glass neon. */
+.mn.neon {
+  --neon: var(--face, #ff4fd8);
+  color: transparent;
+  -webkit-text-stroke: max(1.5px, calc(var(--mfs, 80px) * .03)) color-mix(in srgb, var(--neon) 55%, #fff);
+}
+.mn.neon .mn-g, .mn.neon .mn-sep {
+  filter:
+    drop-shadow(0 0 calc(var(--mfs, 80px) * .02 * var(--glow, .6)) var(--neon))
+    drop-shadow(0 0 calc(var(--mfs, 80px) * .08 * var(--glow, .6)) color-mix(in srgb, var(--neon) 70%, transparent));
+}
+.mn.neon .mn-sep { color: transparent; }
+
+/* ============ Aurora: gradient digits over drifting light ============ */
+.clock.face-aurora { position: relative; }
+.pal-ocean { --a1: #4facfe; --a2: #00f2fe; --a3: #8b5cf6; }
+.pal-sunset { --a1: #ff7a59; --a2: #ff4d8d; --a3: #ffd166; }
+.pal-forest { --a1: #a8e063; --a2: #2dd4bf; --a3: #56ab2f; }
+.pal-berry { --a1: #f472b6; --a2: #a78bfa; --a3: #60a5fa; }
+.au-bg { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.au-bg i {
+  position: absolute; width: 38%; aspect-ratio: 1; border-radius: 50%;
+  filter: blur(calc(var(--mfs, 80px) * .5)); opacity: .34;
+  animation: auFloat 18s ease-in-out infinite alternate;
+}
+.au-bg i:nth-child(1) { background: var(--a1); left: 6%; top: 16%; }
+.au-bg i:nth-child(2) { background: var(--a2); left: 40%; top: 34%; animation-duration: 23s; animation-delay: -7s; }
+.au-bg i:nth-child(3) { background: var(--a3); left: 58%; top: 6%; animation-duration: 27s; animation-delay: -13s; }
+@keyframes auFloat {
+  0% { transform: translate(0, 0) scale(1); }
+  50% { transform: translate(14%, 12%) scale(1.18); }
+  100% { transform: translate(-12%, -8%) scale(.9); }
+}
+.mn.aurora { position: relative; z-index: 1; }
+.mn.aurora .mn-g {
+  background: linear-gradient(110deg, var(--a1), var(--a2), var(--a3), var(--a1));
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  animation: auShift 14s linear infinite;
+}
+.mn.aurora .mn-sep { color: color-mix(in srgb, var(--a2) 55%, transparent); }
+@keyframes auShift { to { background-position: 300% 0; } }
+
+/* ============ Dot matrix ============ */
+.dm { --dmc: var(--face, var(--accent)); display: flex; align-items: center; justify-content: center; gap: calc(var(--dh, 60px) * .16); }
+.dm.col { flex-direction: column; }
+.dm.col .dm-sep { display: none; }
+.dm-g {
+  height: var(--dh, 60px); width: auto; overflow: visible;
+  filter: drop-shadow(0 0 calc(var(--dh, 60px) * .05 * var(--glow, .6)) color-mix(in srgb, var(--dmc) 75%, transparent));
+}
+.dm .d { fill: color-mix(in srgb, var(--dmc) 10%, transparent); transition: fill .1s; }
+.dm .d.on { fill: var(--dmc); }
+.no-ghost .dm .d:not(.on) { fill: transparent; }
+.dm-sep { display: flex; flex-direction: column; gap: calc(var(--dh, 60px) * .24); }
+.dm-sep i { width: calc(var(--dh, 60px) * .115); height: calc(var(--dh, 60px) * .115); border-radius: 50%; background: var(--dmc); box-shadow: 0 0 calc(var(--dh, 60px) * .08 * var(--glow, .6)) var(--dmc); }
+.dm.running .dm-sep { animation: sepblink 1s steps(1, end) infinite; }
+
+/* ============ Analog dial ============ */
+.an { position: relative; width: var(--ad, 200px); height: var(--ad, 200px); flex: none; }
+.an svg { width: 100%; height: 100%; overflow: visible; }
+.an-face { fill: var(--card); }
+.an-rim { fill: none; stroke: var(--line); stroke-width: 1; }
+.an-ticks line { stroke: var(--faint); stroke-width: 1; stroke-linecap: round; }
+.an-ticks line.major { stroke: var(--digit); stroke-width: 2.4; }
+.no-ticks .an-ticks line:not(.major) { display: none; }
+.an-nums text { fill: var(--digit); font-family: var(--digit-font); font-weight: var(--digit-weight); font-size: 13px; text-anchor: middle; dominant-baseline: central; }
+.an.timer .an-nums text { font-size: 10px; fill: var(--muted); }
+.an-digital { fill: var(--ink, var(--digit)); font-family: var(--digit-font); font-weight: var(--digit-weight); font-size: 17px; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.an-label { fill: var(--muted); font-family: var(--ui-font); font-weight: 700; font-size: 7px; letter-spacing: .14em; text-anchor: middle; text-transform: uppercase; }
+.an-hand { transform-box: view-box; transform-origin: 100px 100px; filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .35)); }
+.an.timer .an-h { display: none; }
+.an-h rect, .an-m rect { fill: var(--digit); }
+.an-s { transition: transform .16s linear; }
+.an.jump .an-s { transition: none; }
+.an-s line { stroke: var(--face, var(--accent)); stroke-width: 1.6; stroke-linecap: round; }
+.an-s circle { fill: var(--face, var(--accent)); }
+.an-cap { fill: var(--face, var(--accent)); stroke: var(--card); stroke-width: 1.5; }
+
+/* ============ look options ============ */
+.no-blink :is(.mn-sep, .led-sep, .dm-sep, .nx-sep) { animation: none !important; }
+
+/* Flip "card depth": soft light on the top half, shadow on the bottom */
+.card-shade .card .upper, .card-shade .card .leaf-up { background: linear-gradient(180deg, color-mix(in srgb, var(--card) 84%, #fff), var(--card)); }
+.card-shade .card .lower, .card-shade .card .leaf-down { background: linear-gradient(180deg, color-mix(in srgb, var(--card) 93%, #000), color-mix(in srgb, var(--card) 76%, #000)); }
+.card-shade .card { box-shadow: 0 calc(var(--ch, 100px) * .035) calc(var(--ch, 100px) * .1) rgba(0, 0, 0, .45); }
+
+/* Background effects behind the clock */
+.bd-glow .view-clock, .bd-glow .home-hero, .tpl.bd-glow {
+  background: radial-gradient(60% 55% at 50% 50%, color-mix(in srgb, var(--face, var(--accent)) 16%, transparent), transparent 72%);
+}
+.bd-gradient .view-clock, .bd-gradient .home-hero, .tpl.bd-gradient {
+  background: linear-gradient(170deg, color-mix(in srgb, var(--accent) 12%, var(--bg)) 0%, var(--bg) 65%);
+}
+.tpl.bd-glow, .tpl.bd-gradient { background-color: var(--bg); }
+
+/* ============ templates ============ */
+.tpls { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.tpl {
+  position: relative;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0;
+  padding: 10px 10px 9px;
+  border-radius: 18px;
+  background: var(--bg);
+  color: var(--digit);
+  border: 2px solid color-mix(in srgb, var(--digit) 14%, transparent);
+  text-align: left;
+  overflow: hidden;
+  transition: transform .15s ease, border-color .2s;
+}
+.tpl:active { transform: scale(.97); }
+.tpl[aria-pressed='true'] { border-color: var(--accent); }
+.tpl[aria-pressed='true']::after {
+  content: '✓';
+  position: absolute; top: 8px; right: 8px;
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: #111;
+  font: 800 12px/1 var(--ui-font);
+}
+/* The tile clips; the mini clock itself doesn't, so glows fade out naturally instead of hitting a hard edge. */
+.tpl-mini { flex: none; width: 100%; height: 80px; pointer-events: none; overflow: visible; contain: size; cursor: inherit; }
+.tpl-name { font-size: 13px; font-weight: 650; color: var(--digit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.looks-sheet .btn.block { margin-top: 14px; }
+
+/* ============ settings: sections and "customize further" ============ */
+.set-nav {
+  position: sticky; top: -6px; z-index: 5;
+  display: flex; gap: 6px;
+  overflow-x: auto; scrollbar-width: none;
+  padding: 12px 0 10px;
+  background: linear-gradient(var(--bg) 78%, transparent);
+}
+.set-nav::-webkit-scrollbar { display: none; }
+.set-nav button {
+  flex: none; height: 34px; padding: 0 15px;
+  border-radius: 17px;
+  background: var(--surface); color: var(--muted);
+  font-size: 13.5px; font-weight: 650;
+  transition: background .2s, color .2s, transform .12s;
+}
+.set-nav button:active { transform: scale(.95); }
+.set-nav button[aria-current='true'] { background: var(--accent); color: var(--on-accent); }
+.set-area { scroll-margin-top: 60px; }
+.customize-toggle { margin-top: 14px; justify-content: flex-start; }
+.customize-toggle span { flex: 1; text-align: left; }
+.customize-toggle .chev { transition: transform .25s ease; }
+.customize-toggle[aria-expanded='true'] .chev { transform: rotate(180deg); }
+.customize:not([hidden]) { animation: fadeUp .32s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.row-ctl.wide { flex: 1 1 100%; margin-left: 0; }
+.swatches.sm { gap: 8px; }
+.swatches.sm .swatch { width: 30px; height: 30px; }
+.swatch.auto { background: conic-gradient(from 30deg, #ff9a3c, #d4e157, #22d3ee, #a78bfa, #f472b6, #ff9a3c); }
+.swatch.auto::before { content: 'A'; position: absolute; inset: 5px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--text); font: 800 11px var(--ui-font); }
+@container (min-width: 760px) {
+  .settings { column-count: auto; display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-items: start; }
+  .settings > .preview, .settings > .set-nav, .settings > .area-looks { grid-column: 1 / -1; }
+  .settings .customize { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-items: start; }
+  .settings .customize > :first-child { grid-column: 1 / -1; }
+}
+
+/* ============ smoother feel ============ */
+.icon-btn, .tab-ic, .live-card, .face-tile, .theme-tile, .font-tile, .chip, .swatch, .sess, .pill { transition: transform .14s ease, background .2s, color .2s, border-color .2s; }
+.icon-btn:active:not(:disabled) { transform: scale(.9); }
+.tab:active .tab-ic { transform: scale(.9); }
+.live-card:active { transform: scale(.985); }
+.face-tile:active, .theme-tile:active, .font-tile:active, .swatch:active, .pill:active { transform: scale(.95); }
+
+/* Tab changes cross-fade (View Transitions); the tab bar itself stays put. */
+.tabbar { view-transition-name: tabbar; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
+
+/* Home dashboard cards float in the first time Home opens */
+.home-bento.intro > * { animation: fadeUp .5s cubic-bezier(.2, .8, .2, 1) both; }
+.home-bento.intro > :nth-child(2) { animation-delay: .04s; }
+.home-bento.intro > :nth-child(3) { animation-delay: .08s; }
+.home-bento.intro > :nth-child(4) { animation-delay: .12s; }
+.home-bento.intro > :nth-child(5) { animation-delay: .16s; }
+.home-bento.intro > :nth-child(6) { animation-delay: .2s; }
+.home-bento.intro > :nth-child(7) { animation-delay: .24s; }
+.home-bento.intro > :nth-child(n + 8) { animation-delay: .28s; }
+
+.hero-head .topbar-right { display: flex; gap: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .au-bg i, .mn.aurora .mn-g { animation: none !important; }
+}

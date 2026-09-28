@@ -45,12 +45,15 @@ const sumDays = (from, to, now) => {
   return { total, active };
 };
 
-export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
+export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }) {
   root.innerHTML = `
     <section class="home-hero">
       <header class="hero-head">
         <div class="hero-when"><span class="greet"></span><span class="home-date"></span></div>
-        <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
+        <div class="topbar-right">
+          <button class="icon-btn" data-looks aria-label="Looks" title="Looks">${icon('palette')}</button>
+          <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
+        </div>
       </header>
       <div class="clock home-clock" role="timer" aria-label="Current time"></div>
       <div class="home-clock-sub"></div>
@@ -66,6 +69,7 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
   let face = makeFace(clockEl, data.settings.face);
   let minuteKey = '';
   let chartW = 0;
+  let introDone = false;
 
   function digits(now) {
     const d = new Date(now);
@@ -333,6 +337,11 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
     );
     drawCharts(now);
     header(now);
+    if (!introDone) {
+      introDone = true; // cards float in once, not on every refresh
+      bento.classList.add('intro');
+      setTimeout(() => bento.classList.remove('intro'), 1200);
+    }
   }
 
   function tick(now = Date.now(), animate = true) {
@@ -341,7 +350,7 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
     const countChanged = ds.length !== face.count;
     const d = new Date(now);
     const label = is24() ? d.toLocaleDateString([], { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
-    face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label });
+    face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label, date: d });
     if (countChanged) fit();
     const mk = `${d.getHours()}:${d.getMinutes()}`;
     if (mk !== minuteKey) {
@@ -359,6 +368,7 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
       return;
     }
     if (e.target.closest('[data-settings]')) return openSettings();
+    if (e.target.closest('[data-looks]')) return openLooks();
     const go = e.target.closest('[data-go]');
     if (go) return goTab(go.dataset.go);
     const s = e.target.closest('[data-sess]');
