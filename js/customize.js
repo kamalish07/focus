@@ -1,18 +1,17 @@
 // Customize: every template, clock style, font and colour, on a page of its own.
-// The colour theme stays on the simple Looks panel.
-import { data, saveSoon, emit, on } from './store.js';
+// which = 'main' edits the stopwatch, timer and Pomodoro look (its theme stays on the simple
+// Looks panel); which = 'home' edits Home's own look, theme included, once Home has one.
+import { data, saveSoon, emit, on, lookOf, lookTarget, pushScope } from './store.js';
 import { FONTS, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } from './config.js';
 import { sheet, switchEl, segEl, bindControls, haptic } from './ui.js';
-import { makeFace, FACES, homeFaceType } from './faces.js';
-import { templatesHtml, drawTemplates, markTemplates, applyTemplate, mountPreview } from './looks.js';
+import { makeFace, FACES } from './faces.js';
+import { templatesHtml, drawTemplates, markTemplates, markThemes, themesHtml, homeLookHtml, applyTemplate, setLook, setHomeOwnLook, mountPreview } from './looks.js';
 import { esc, getPath, setPath } from './util.js';
 
 const group = (title, inner, cls = '') =>
-  `<section class="set-sec"><h3 class="group-title">${title}</h3><div class="group ${cls}">${inner}</div></section>`;
+  `<section class="set-sec">${title ? `<h3 class="group-title">${title}</h3>` : ''}<div class="group ${cls}">${inner}</div></section>`;
 const row = (label, ctl, hint = '') =>
   `<div class="row"><div class="row-label">${label}${hint ? `<small>${hint}</small>` : ''}</div><div class="row-ctl">${ctl}</div></div>`;
-const range = (key, min, max, step, label) =>
-  `<input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${getPath(data.settings, key)}" aria-label="${esc(label)}">`;
 
 const COLOR_ROWS = [
   ['bg', 'Background'],
@@ -21,15 +20,15 @@ const COLOR_ROWS = [
   ['accent', 'Accent'],
 ];
 
-let target = 'timers'; // which clock the style tiles change: 'timers' or 'home'
-
-export function openCustomize({ onClose } = {}) {
+export function openCustomize({ which = 'main', onClose } = {}) {
+  const home = which === 'home';
   let tileRO = null;
   let tplCleanup = null;
   let previewCleanup = null;
   let offFit = null;
+  const pop = pushScope(which); // the app wears this look while the page is open
   const pg = sheet({
-    title: 'Customize',
+    title: home ? 'Home clock' : 'Customize',
     kind: 'page',
     cls: 'customize-page',
     body: '<div class="customize"></div>',
@@ -38,37 +37,32 @@ export function openCustomize({ onClose } = {}) {
       tplCleanup?.();
       previewCleanup?.();
       offFit?.();
+      pop();
       onClose?.();
     },
   });
   const root = pg.body.querySelector('.customize');
+  const L = () => lookOf(which); // what the look is now
+  const T = () => lookTarget(which); // where changes go
+  const own = () => !home || !!data.settings.homeLook;
+
+  const range = (key, min, max, step, label) =>
+    `<input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${getPath(L(), key)}" aria-label="${esc(label)}">`;
 
   const swatches = () =>
     `<div class="swatches sm">${FACE_COLORS.map(
       ([v, n]) =>
-        `<button class="swatch${v === 'auto' ? ' auto' : ''}" data-fcolor="${v}" style="--c:${v === 'auto' ? 'transparent' : v}" title="${n}" aria-label="${n}" aria-pressed="${data.settings.faceColor === v}"></button>`
+        `<button class="swatch${v === 'auto' ? ' auto' : ''}" data-fcolor="${v}" style="--c:${v === 'auto' ? 'transparent' : v}" title="${n}" aria-label="${n}" aria-pressed="${L().faceColor === v}"></button>`
     ).join('')}</div>`;
 
   const fontTile = (f) =>
-    `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
+    `<button class="font-tile" data-font="${f.id}" aria-pressed="${L().font === f.id}">
       <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
-
-  const activeFace = () => (target === 'home' ? homeFaceType() : data.settings.face);
-
-  function faceTilesHtml() {
-    const s = data.settings;
-    const cur = target === 'home' ? (s.homeFace && s.homeFace !== 'same' ? s.homeFace : 'same') : s.face;
-    const list = target === 'home' ? [['same', 'Same as timers'], ...FACES] : FACES;
-    return list
-      .map(([id, name]) => `<button class="face-tile" data-face="${id}" aria-pressed="${cur === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`)
-      .join('');
-  }
 
   /** Options that only make sense for the chosen clock style. */
   function styleOptionsHtml() {
-    const s = data.settings;
-    const face = activeFace();
-    const name = (FACES.find(([id]) => id === face) || FACES[0])[1];
+    const s = L();
+    const name = (FACES.find(([id]) => id === s.face) || FACES[0])[1];
     const colour = (label) => `<div class="row"><div class="row-label">${label}</div><div class="row-ctl wide">${swatches()}</div></div>`;
     const glow = row('Glow', range('glow', 0, 1, 0.05, 'Glow'));
     const blink = row('Blinking colon', switchEl('blink', s.blink !== false, 'Blinking colon'));
@@ -89,21 +83,29 @@ export function openCustomize({ onClose } = {}) {
       ring: colour('Ring colour') + ticks,
       analog: colour('Second hand colour') + ticks,
     };
-    return group(`${esc(name)} options`, rows[face] || rows.flip);
+    return group(`${esc(name)} options`, rows[s.face] || rows.flip);
   }
 
   function html() {
-    const s = data.settings;
+    const s = L();
     const c = themeColors(s);
+    const ownSwitch = home
+      ? group('', row('Own look for Home', switchEl('ownLook', own(), 'Own look for Home'), own() ? 'Home has its own template, style, colours and font' : 'Off: Home looks the same as your stopwatch and timers'))
+      : '';
+    if (!own()) {
+      return `<div class="preview"><div class="clock preview-clock"></div></div>${ownSwitch}
+        <p class="hint small center own-hint">Turn it on to give Home its own template, clock style, theme, colours and font. Your stopwatch and timers keep theirs.</p>`;
+    }
     return `
       <div class="preview"><div class="clock preview-clock"></div></div>
-      ${group('All templates', templatesHtml(), 'pad')}
+      ${ownSwitch}
+      ${group(home ? 'Templates' : 'All templates', templatesHtml(undefined, '', which), 'pad')}
+      ${home ? group('Theme', themesHtml(which), 'pad') : ''}
       ${group(
         'Clock style',
-        `<div class="seg face-target" role="tablist" aria-label="Which clock">${[['timers', 'Stopwatch & timers'], ['home', 'Home']]
-          .map(([v, l]) => `<button role="tab" data-target="${v}" aria-selected="${target === v}">${l}</button>`)
-          .join('')}</div>
-        <div class="face-tiles">${faceTilesHtml()}</div>`,
+        `<div class="face-tiles">${FACES.map(
+          ([id, name]) => `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
+        ).join('')}</div>`,
         'pad'
       )}
       <div class="style-opts">${styleOptionsHtml()}</div>
@@ -119,8 +121,9 @@ export function openCustomize({ onClose } = {}) {
         row('Digit size', range('digitScale', 0.8, 1.2, 0.01, 'Digit size')) +
           row('Corner roundness', range('radius', 0, 0.25, 0.005, 'Corner roundness'), 'Flip cards') +
           row('Background', segEl('backdrop', s.backdrop || 'none', [['none', 'None'], ['glow', 'Glow'], ['gradient', 'Gradient']], 'Background'), 'Soft light behind the clock') +
-          row('Tick sound', switchEl('tick', s.tick, 'Tick sound'), 'A soft click every second while running')
-      )}`;
+          (home ? '' : row('Tick sound', switchEl('tick', data.settings.tick, 'Tick sound'), 'A soft click every second while running'))
+      )}
+      ${home ? '' : `<section class="set-sec"><h3 class="group-title">Home</h3><div class="home-look-slot">${homeLookHtml()}</div></section>`}`;
   }
 
   /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
@@ -130,7 +133,7 @@ export function openCustomize({ onClose } = {}) {
     tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
     for (const tile of root.querySelectorAll('.face-tile')) {
       const el = tile.querySelector('.face-mini');
-      el._face = makeFace(el, tile.dataset.face === 'same' ? data.settings.face : tile.dataset.face);
+      el._face = makeFace(el, tile.dataset.face, { settings: L });
       el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
       fitMini(el);
       tileRO.observe(el);
@@ -140,18 +143,20 @@ export function openCustomize({ onClose } = {}) {
   function render() {
     root.innerHTML = html();
     previewCleanup?.();
-    previewCleanup = mountPreview(root.querySelector('.preview-clock'), { home: () => target === 'home' });
+    previewCleanup = mountPreview(root.querySelector('.preview-clock'), { which });
     tplCleanup?.();
     tplCleanup = drawTemplates(root);
     drawFaceTiles();
   }
 
-  /** Brings every control in line with the settings after a template or theme change. */
+  /** Brings every control in line with the look after a template or theme change. */
   function sync() {
-    const s = data.settings;
+    if (!root.querySelector('.face-tiles')) return;
+    const s = L();
     const c = themeColors(s);
-    markTemplates(root);
-    root.querySelector('.face-tiles').innerHTML = faceTilesHtml();
+    markTemplates(root, which);
+    markThemes(root, which);
+    root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.face === s.face)));
     drawFaceTiles();
     root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.font === s.font)));
     root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
@@ -170,16 +175,23 @@ export function openCustomize({ onClose } = {}) {
     saveSoon();
     emit('settings');
   };
+  /** A hand-made change: this look is no longer an untouched template. */
   const lookChanged = () => {
-    data.settings.template = null;
-    markTemplates(root);
+    T().template = null;
+    markTemplates(root, which);
   };
 
   bindControls(root, {
-    get: (k) => getPath(data.settings, k),
+    get: (k) => (k === 'ownLook' ? own() : getPath(LOOK_KEYS.has(k) ? L() : data.settings, k)),
     set: (k, v) => {
-      setPath(data.settings, k, v);
-      if (LOOK_KEYS.has(k)) lookChanged();
+      if (k === 'ownLook') {
+        setHomeOwnLook(v);
+        return render();
+      }
+      if (LOOK_KEYS.has(k)) {
+        setPath(T(), k, v);
+        lookChanged();
+      } else setPath(data.settings, k, v);
       changed();
     },
   });
@@ -187,52 +199,55 @@ export function openCustomize({ onClose } = {}) {
   root.addEventListener('input', (e) => {
     const t = e.target;
     if (!t.matches('input[data-color]')) return;
-    const s = data.settings;
-    s.custom = { ...themeColors(s), [t.dataset.color]: t.value };
-    s.theme = 'custom';
+    const target = T();
+    target.custom = { ...themeColors(L()), [t.dataset.color]: t.value };
+    target.theme = 'custom';
     t.parentElement.style.setProperty('--c', t.value);
     lookChanged();
+    markThemes(root, which);
     changed();
   });
 
   root.addEventListener('click', (e) => {
-    const s = data.settings;
     const tpl = e.target.closest('[data-tpl]');
     if (tpl) {
       haptic(8);
-      applyTemplate(tpl.dataset.tpl);
+      applyTemplate(tpl.dataset.tpl, which);
       return sync();
     }
-    const tg = e.target.closest('[data-target]');
-    if (tg) {
-      target = tg.dataset.target;
-      root.querySelectorAll('[data-target]').forEach((b) => b.setAttribute('aria-selected', String(b === tg)));
-      root.querySelector('.face-tiles').innerHTML = faceTilesHtml();
-      drawFaceTiles();
-      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
-      return;
+    const th = e.target.closest('[data-theme]');
+    if (th) {
+      haptic(6);
+      setLook({ theme: th.dataset.theme }, which);
+      return sync();
+    }
+    if (e.target.closest('[data-home-look]')) {
+      return openCustomize({
+        which: 'home',
+        onClose: () => {
+          const slot = root.querySelector('.home-look-slot');
+          if (slot) slot.innerHTML = homeLookHtml();
+        },
+      });
     }
     const fc = e.target.closest('.face-tile');
     if (fc) {
-      if (target === 'home') s.homeFace = fc.dataset.face; // Home's own style isn't part of a template
-      else {
-        s.face = fc.dataset.face;
-        lookChanged();
-      }
+      T().face = fc.dataset.face;
+      lookChanged();
       root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
       root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
       return changed();
     }
     const col = e.target.closest('[data-fcolor]');
     if (col) {
-      s.faceColor = col.dataset.fcolor;
+      T().faceColor = col.dataset.fcolor;
       lookChanged();
       col.parentElement.querySelectorAll('[data-fcolor]').forEach((b) => b.setAttribute('aria-pressed', String(b === col)));
       return changed();
     }
     const ft = e.target.closest('[data-font]');
     if (ft) {
-      s.font = ft.dataset.font;
+      T().font = ft.dataset.font;
       lookChanged();
       root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === ft)));
       return changed();

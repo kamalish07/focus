@@ -16,8 +16,9 @@ like a normal app, works offline, and keeps all data on your device.
   time by category (with an optional daily goal), a week chart, a consistency heatmap and
   recent sessions.
 - **Nine clock styles:** Flip (split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix,
-  Nixie tubes, Ring and Analog. Vertical on phones, horizontal in landscape. Home can use a
-  different style from the stopwatch and timers.
+  Nixie tubes, Ring and Analog. Vertical on phones, horizontal in landscape.
+- **Home clock can have its own look:** its own template, theme, clock style, colours and font,
+  while the stopwatch and timers keep theirs (Looks → Home clock).
 - **16 ready-made looks:** the palette button shows four favourites and the colour theme.
   *More looks* opens every template plus per-style colour, glow, unlit segments, tick marks,
   flip speed, card depth, aurora palette, your own colours, font, digit size and a background

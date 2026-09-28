@@ -1,6 +1,6 @@
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd } from './store.js';
+import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf } from './store.js';
 import * as engine from './engine.js';
 import { makeFace, homeFaceType } from './faces.js';
 import { icon } from './ui.js';
@@ -9,6 +9,9 @@ import { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } from './util.js';
 
 /** 24-hour clock? Follows the phone unless set in Settings. */
 export const is24 = () => data.settings.clock24 ?? new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
+
+/** Home's clock reads Home's own look (or the timers' when Home matches them). */
+const HOME_CTX = { settings: () => lookOf('home') };
 
 const HEAT = ['var(--surface-2)', 'color-mix(in srgb, var(--accent) 30%, var(--card))', 'color-mix(in srgb, var(--accent) 54%, var(--card))', 'color-mix(in srgb, var(--accent) 77%, var(--card))', 'var(--accent)'];
 
@@ -56,7 +59,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
   const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
-  let face = makeFace(clockEl, homeFaceType());
+  let face = makeFace(clockEl, homeFaceType(), HOME_CTX);
   let minuteKey = '';
   let chartW = 0;
 
@@ -315,7 +318,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
 
   function tick(now = Date.now(), animate = true) {
     if (face.type !== homeFaceType()) {
-      face = makeFace(clockEl, homeFaceType());
+      face = makeFace(clockEl, homeFaceType(), HOME_CTX);
       header(now);
     }
     const ds = digits(now);

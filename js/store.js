@@ -1,4 +1,4 @@
-import { PALETTE, TEMPLATES, LOOK_DEFAULTS } from './config.js';
+import { PALETTE, TEMPLATES, LOOK_DEFAULTS, LOOK_KEYS } from './config.js';
 import { MIN, pad } from './util.js';
 
 const KEY = 'focus.v1';
@@ -6,11 +6,14 @@ const KEY = 'focus.v1';
 /** Time can be logged without a category; it's grouped under this id. */
 export const NONE = 'none';
 
+/** Everything that makes up a look (a template's worth, plus which template it came from). */
+const LOOK_FIELDS = [...LOOK_KEYS, 'template'];
+
 export const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
   face: 'flip', // see FACES in faces.js (stopwatch, timer and Pomodoro)
-  homeFace: 'same', // Home's clock: 'same' as the timers, or a face of its own
+  homeLook: null, // Home's own look (template, theme, style, font…), or null to match the timers
   template: 'classic', // last template applied; null once you customise
   faceColor: 'auto',
   glow: 0.6,
@@ -93,6 +96,10 @@ function normalize(d) {
   if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
+  // 1.9.0 let Home pick just a clock style; that becomes Home's own look.
+  if (settings.homeFace && settings.homeFace !== 'same' && !settings.homeLook) settings.homeLook = { ...copyLook(settings), face: settings.homeFace, template: null };
+  delete settings.homeFace;
+  if (settings.homeLook && typeof settings.homeLook !== 'object') settings.homeLook = null;
   // Categories are optional: an empty list is fine (everything is then "No category").
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
   if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
@@ -133,6 +140,8 @@ function demoData() {
   if (face) d.settings.face = face;
   const tpl = TEMPLATES.find((t) => t.id === new URLSearchParams(location.search).get('tpl'));
   if (tpl) Object.assign(d.settings, LOOK_DEFAULTS, tpl.look, { template: tpl.id });
+  const homeTpl = TEMPLATES.find((t) => t.id === new URLSearchParams(location.search).get('hometpl'));
+  if (homeTpl) d.settings.homeLook = { ...copyLook(d.settings), ...LOOK_DEFAULTS, ...homeTpl.look, template: homeTpl.id };
   const noGoal = new URLSearchParams(location.search).has('nogoal');
   d.cats = [
     { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
@@ -181,6 +190,46 @@ function setData(obj) {
   for (const k of Object.keys(data)) delete data[k];
   Object.assign(data, obj);
   save();
+}
+
+/* ---------- looks: the timers' look, and optionally one of Home's own ---------- */
+
+/** The look-related part of a settings object (a fresh copy). */
+export function copyLook(src) {
+  const out = {};
+  for (const k of LOOK_FIELDS) if (src[k] !== undefined) out[k] = k === 'custom' ? { ...src[k] } : src[k];
+  return out;
+}
+
+/** Settings with a look laid over them: 'home' uses Home's own look when it has one. */
+export const lookOf = (which) => (which === 'home' && data.settings.homeLook ? { ...data.settings, ...data.settings.homeLook } : data.settings);
+
+/** Where changes to that look are written. */
+export const lookTarget = (which) => (which === 'home' && data.settings.homeLook ? data.settings.homeLook : data.settings);
+
+// Which look the app wears right now: the tab's (Home or the timers), unless a page that edits
+// a look is open on top, in which case that page's look, so what you see is what you edit.
+const scopes = [];
+let tabScope = 'main';
+export const lookScope = () => (scopes.length ? scopes[scopes.length - 1].which : tabScope);
+export const shownLook = () => lookOf(lookScope());
+/** Returns true when the switch changes what the app should look like. */
+export function setTabScope(which) {
+  const before = lookScope();
+  tabScope = which;
+  return before !== lookScope() && !!data.settings.homeLook;
+}
+/** Show `which` look while a page is open; returns the function that stops. */
+export function pushScope(which) {
+  const token = { which };
+  scopes.push(token);
+  emit('settings');
+  return () => {
+    const i = scopes.indexOf(token);
+    if (i < 0) return;
+    scopes.splice(i, 1);
+    emit('settings');
+  };
 }
 
 /* ---------- events ---------- */

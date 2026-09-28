@@ -313,6 +313,18 @@ body:has(.app.landscape) .toast { bottom: auto; }
 .chip.sm svg.i { width: 15px; height: 15px; }
 .chip.danger { color: var(--danger); }
 
-/* Customize: pick the style for the timers or for Home */
-.seg.face-target { display: flex; width: 100%; margin-bottom: 12px; }
-.seg.face-target > button { flex: 1; }
+/* Home clock card: a little dial in Home's colours */
+.home-look-card { margin-top: 8px; }
+.hl-dial { position: relative; flex: none; width: 70px; height: 48px; display: grid; place-items: center; }
+.hl-dial::before {
+  content: ''; width: 42px; height: 42px; border-radius: 50%;
+  background: var(--b);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .35), inset 0 0 0 1.5px color-mix(in srgb, var(--d) 30%, transparent);
+}
+.hl-dial i { position: absolute; left: 50%; top: 50%; border-radius: 2px; transform-origin: 50% 100%; }
+.hl-h { width: 3px; height: 11px; margin: -11px 0 0 -1.5px; background: var(--d); transform: rotate(-55deg); }
+.hl-m { width: 2px; height: 16px; margin: -16px 0 0 -1px; background: var(--a); transform: rotate(35deg); }
+.hl-dial .ml-badge { right: 4px; bottom: -3px; }
+.more-looks:is(:hover, :active) .hl-m { transform: rotate(65deg); transition: transform .3s cubic-bezier(.2, .8, .2, 1); }
+.hl-m { transition: transform .3s cubic-bezier(.2, .8, .2, 1); }
+.own-hint { margin: 14px 8px 0; }

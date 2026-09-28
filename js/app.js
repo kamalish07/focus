@@ -1,6 +1,6 @@
 import { $, $$, pad, hms, clamp, fmtDur, fmtTime, luminance, MIN } from './util.js';
 import { themeColors, fontById } from './config.js';
-import { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor, sessionDur, DEMO } from './store.js';
+import { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor, sessionDur, DEMO, shownLook, setTabScope } from './store.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as bg from './background.js';
@@ -36,13 +36,16 @@ const isModeTab = (t = tab) => engine.MODES.includes(t);
 
 for (const el of $$('[data-icon]')) el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon));
 
-const home = mountHome($('.view-home'), { goTab: showTab, openSettings: () => openSettings(), openLooks: () => showLooks(), togglePlay, visible: () => tab === 'home' });
+const home = mountHome($('.view-home'), { goTab: showTab, openSettings: () => openSettings(), openLooks: () => showLooks('home'), togglePlay, visible: () => tab === 'home' });
 const stats = mountStats($('.view-stats .stats'), { visible: () => tab === 'stats' });
 
 /* ---------- appearance ---------- */
 
+/** The look on screen: Home's own on Home (when it has one), the timers' everywhere else. */
+const L = () => shownLook();
+
 function applyTheme() {
-  const t = themeColors(S());
+  const t = themeColors(L());
   const st = document.documentElement.style;
   st.setProperty('--bg', t.bg);
   st.setProperty('--card', t.card);
@@ -58,7 +61,7 @@ function applyTheme() {
 }
 
 function applyFont() {
-  const f = fontById(S().font);
+  const f = fontById(L().font);
   const st = document.documentElement.style;
   st.setProperty('--digit-font', f.family);
   st.setProperty('--digit-weight', f.weight);
@@ -100,7 +103,7 @@ function fit() {
 
 /** Style options live on <html> so the clock, Home and Settings previews all pick them up. */
 function applyLook() {
-  const s = S();
+  const s = L();
   const html = document.documentElement;
   if (s.faceColor && s.faceColor !== 'auto') html.style.setProperty('--face', s.faceColor);
   else html.style.removeProperty('--face');
@@ -120,7 +123,7 @@ function applyAll() {
   applyTheme();
   applyLook();
   appEl.classList.toggle('show-info', !!S().showInfo);
-  document.body.classList.toggle('no-hinge', !S().hinge);
+  document.body.classList.toggle('no-hinge', !L().hinge);
   audio.setVolume(S().volume);
   applyFont();
   if (tab === 'home') home.refresh();
@@ -141,6 +144,7 @@ function showTab(t) {
 function swapTab(t) {
   if (!TABS.includes(t)) t = 'home';
   tab = t;
+  const restyle = setTabScope(t === 'home' ? 'home' : 'main'); // Home may wear a look of its own
   if (isModeTab(t)) engine.setView(t);
   $('.view-home').hidden = t !== 'home';
   clockView.hidden = !isModeTab(t);
@@ -156,10 +160,13 @@ function swapTab(t) {
   appEl.classList.remove('chrome-hidden', 'immersive', 'overlay-on');
   syncFullButton();
   suppressAuto = false;
-  fit();
-  if (t === 'home') home.refresh();
+  if (restyle) applyAll();
+  else {
+    fit();
+    if (t === 'home') home.refresh();
+    frame(true);
+  }
   if (t === 'stats') stats.refresh();
-  frame(true);
   poke();
   if (isModeTab(t) && !S().seenTip) {
     S().seenTip = true;
@@ -380,11 +387,16 @@ skipBtn.addEventListener('click', () => {
 });
 $('#btn-cat').addEventListener('click', openCategories);
 for (const b of $$('[data-open-settings]')) b.addEventListener('click', () => openSettings());
-for (const b of $$('[data-open-looks]')) b.addEventListener('click', showLooks);
+for (const b of $$('[data-open-looks]')) b.addEventListener('click', () => showLooks('main'));
 
-function showLooks() {
+/** The palette on Home edits Home's look (its own, when it has one); on the clock screen, the timers'. */
+function showLooks(which = 'main') {
   haptic(6);
-  openLooks({ onMore: () => openCustomize() });
+  openLooks({
+    which,
+    onMore: () => openCustomize({ which: which === 'home' && S().homeLook ? 'home' : 'main' }),
+    onHome: () => openCustomize({ which: 'home' }),
+  });
 }
 
 document.addEventListener('keydown', (e) => {
@@ -605,7 +617,8 @@ if (DEMO) {
   const q = new URLSearchParams(location.search);
   if (q.has('settings')) setTimeout(() => openSettings(), 300);
   if (q.has('customize')) setTimeout(() => openCustomize(), 300);
-  if (q.has('looks')) setTimeout(showLooks, 300);
+  if (q.has('homelook')) setTimeout(() => openCustomize({ which: 'home' }), 300);
+  if (q.has('looks')) setTimeout(() => showLooks(q.get('looks') === 'home' ? 'home' : 'main'), 300);
 }
 setInterval(frame, 150);
 initPWA();

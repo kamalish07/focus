@@ -6,7 +6,7 @@
 // face.fit({ W, H, row, stretch })
 import { FlipClock, fontMetrics, sizeCards } from './flip.js';
 import { fontById } from './config.js';
-import { data } from './store.js';
+import { data, lookOf } from './store.js';
 import { clamp } from './util.js';
 
 export const FACES = [
@@ -21,10 +21,8 @@ export const FACES = [
   ['analog', 'Analog'],
 ];
 
-/** Home can have a clock style of its own; 'same' follows the stopwatch, timer and Pomodoro. */
-export function homeFaceType(s = data.settings) {
-  return s.homeFace && s.homeFace !== 'same' && FACES.some(([id]) => id === s.homeFace) ? s.homeFace : s.face;
-}
+/** Home's clock style: from Home's own look when it has one, otherwise the timers'. */
+export const homeFaceType = () => lookOf('home').face;
 
 const FLIP_SPEED = { slow: 900, normal: 620, fast: 380 };
 const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
@@ -38,8 +36,9 @@ export function makeFace(el, type = 'flip', ctx = {}) {
   for (const [id] of FACES) el.classList.remove(`face-${id}`);
   el.classList.add(`face-${type}`);
   const env = {
-    s: () => ctx.settings || data.settings,
-    m: () => fontMetrics(fontById(ctx.font || (ctx.settings || data.settings).font)),
+    // ctx.settings may be a function, so a face follows a look that changes (Home's own look).
+    s: () => (typeof ctx.settings === 'function' ? ctx.settings() : ctx.settings) || data.settings,
+    m: () => fontMetrics(fontById(ctx.font || env.s().font)),
   };
   const build = { flip: flipFace, minimal: textFace, neon: textFace, aurora: textFace, led: ledFace, dots: dotsFace, nixie: nixieFace, ring: ringFace, analog: analogFace };
   const face = build[type](el, env, type);
