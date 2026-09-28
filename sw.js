@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION whenever you change the app files so phones pick up the update.
-const VERSION = 'focus-v1.3.0';
+const VERSION = 'focus-v1.4.0';
 const FONT_CACHE = 'focus-fonts';
 const SHELL = [
   './',
@@ -7,6 +7,7 @@ const SHELL = [
   'manifest.webmanifest',
   'css/styles.css',
   'js/app.bundle.js',
+  'icons/icon-96.png',
   'icons/icon-192.png',
   'icons/icon-512.png',
   'icons/maskable-512.png',

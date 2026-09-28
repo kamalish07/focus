@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -225,7 +225,41 @@ function normalize(d) {
   return { v: 3, settings, cats: cats.length ? cats : def.cats, sessions, runners };
 }
 
+/** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
+const DEMO = new URLSearchParams(location.search).has('demo');
+
+function demoData() {
+  const d = defaults();
+  Object.assign(d.settings, { seenTip: true, askedNotif: true });
+  d.cats = [
+    { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
+    { id: 'math', name: 'Math', color: PALETTE[1], goal: 60 },
+    { id: 'read', name: 'Reading', color: PALETTE[2], goal: 30 },
+  ];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const today = new Date();
+  for (let back = 1; back <= 150; back++) {
+    if (rnd() < 0.18) continue;
+    let t = new Date(today.getFullYear(), today.getMonth(), today.getDate() - back, 9).getTime();
+    for (const c of d.cats) {
+      if (rnd() < 0.3) continue;
+      const dur = Math.round((20 + rnd() * (c.id === 'study' ? 160 : 50)) * MIN);
+      d.sessions.push({ id: `d${back}${c.id}`, cat: c.id, mode: ['stopwatch', 'timer', 'pomodoro'][Math.floor(rnd() * 3)], start: t, segs: [[t, t + dur]], adj: 0, run: null, note: '' });
+      t += dur + 40 * MIN;
+    }
+  }
+  const n = Date.now();
+  d.sessions.push({ id: 'dt1', cat: 'study', mode: 'pomodoro', start: n - 200 * MIN, segs: [[n - 200 * MIN, n - 150 * MIN]], adj: 0, run: null, note: 'Organic chemistry' });
+  d.sessions.push({ id: 'dt2', cat: 'math', mode: 'timer', start: n - 130 * MIN, segs: [[n - 130 * MIN, n - 85 * MIN]], adj: 0, run: null, note: 'Problem set 4' });
+  const st = n - 47 * MIN - 12000;
+  d.sessions.push({ id: 'dlive', cat: 'study', mode: 'stopwatch', start: st, segs: [], adj: 0, run: st, note: '' });
+  Object.assign(d.runners.stopwatch, { runStart: st, sid: 'dlive', touched: st });
+  return d;
+}
+
 function load() {
+  if (DEMO) return normalize(demoData());
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return normalize(JSON.parse(raw));
@@ -262,7 +296,7 @@ function save() {
   clearTimeout(saveTimer);
   cache = null;
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    if (!DEMO) localStorage.setItem(KEY, JSON.stringify(data));
   } catch (e) {
     console.warn('Focus: could not save', e);
   }
@@ -472,7 +506,7 @@ function streak(catId = null, now = Date.now()) {
   }
   return n;
 }
-return { DEFAULT_SETTINGS, MODES, freshRunner, data, on, emit, save, saveSoon, replaceAll, resetAll, catById, currentCat, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
+return { DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, on, emit, save, saveSoon, replaceAll, resetAll, catById, currentCat, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
 })();
 
 // ---------- engine.js ----------
@@ -2856,7 +2890,7 @@ function openSettings() {
         row('Show', segEl('format', s.format, [['auto', 'Auto'], ['hms', 'H M S'], ['hm', 'H M']], 'Digits shown'), 'Auto: minutes and seconds first, the hours card joins after an hour') +
           row('Stopwatch shows', segEl('display', s.display, [['session', 'Session'], ['today', 'Today']], 'Stopwatch shows'), 'This session, or everything today in the category') +
           row('Layout', segEl('layout', s.layout, [['auto', 'Auto'], ['row', 'Wide'], ['col', 'Tall']], 'Layout')) +
-          row('Hide buttons while running', switchEl('autoHide', s.autoHide, 'Hide buttons while running'), 'Tap anywhere to bring them back')
+          row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'Buttons hide and the cards fill the screen. Tap anywhere for options.')
       )}
 
       ${group(
@@ -2922,7 +2956,7 @@ function openSettings() {
         'pad'
       )}
 
-      ${group('App', installRow() + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
+      ${group('App', installRow() + row('Privacy', '<a class="btn sm" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>', 'Your data stays on this device') + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
       <p class="footnote">Keys: 1–5 switch tabs · Space start/pause · R reset · E edit</p>`;
   }
 
@@ -3102,7 +3136,7 @@ return { openSettings };
 __m.app = (() => {
 const { $, $$, pad, hms, clamp, fmtDur, fmtTime, luminance, MIN } = __m.util;
 const { themeColors, fontById } = __m.config;
-const { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor, sessionDur } = __m.store;
+const { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor, sessionDur, DEMO } = __m.store;
 const engine = __m.engine;
 const audio = __m.audio;
 const bg = __m.background;
@@ -3150,7 +3184,7 @@ function applyTheme() {
   document.documentElement.dataset.scheme = luminance(t.bg) > 0.35 ? 'light' : 'dark';
   $('meta[name="theme-color"]').setAttribute('content', t.bg);
   try {
-    localStorage.setItem('focus.bg', t.bg);
+    if (!DEMO) localStorage.setItem('focus.bg', t.bg);
   } catch {}
 }
 
@@ -3177,9 +3211,13 @@ function applyOrientation() {
   appEl.classList.toggle('layout-col', !row);
 }
 
-/** Size the timer's cards to fill the space available, in a row or a column. */
+/**
+ * Size the timer's cards to fill the space available, in a row or a column.
+ * In full-screen mode the cards may stretch further so they cover the whole screen.
+ */
 function fitClock() {
   const row = appEl.classList.contains('layout-row');
+  const full = appEl.classList.contains('immersive');
   const n = Math.max(1, clock.cards.length);
   const W = clockEl.clientWidth;
   const H = clockEl.clientHeight;
@@ -3190,13 +3228,13 @@ function fitClock() {
   if (row) {
     gap = clamp(W * 0.018, 6, 22);
     cw = (W - gap * (n - 1)) / n;
-    ch = Math.min(H, cw * 1.02);
-    cw = Math.min(cw, ch * 1.12);
+    ch = Math.min(H, cw * (full ? 1.3 : 1.02));
+    cw = Math.min(cw, ch * (full ? 1.7 : 1.12));
   } else {
     gap = clamp(H * 0.022, 6, 18);
     ch = (H - gap * (n - 1)) / n;
-    cw = Math.min(W, ch * 1.35);
-    ch = Math.min(ch, cw);
+    cw = Math.min(W, ch * (full ? 2.2 : 1.35));
+    ch = Math.min(ch, cw * (full ? 1.35 : 1));
   }
   ch = Math.floor(ch / 2) * 2;
   sizeCards(clockEl, { cw: Math.floor(cw), ch, gap: Math.round(gap) }, metrics, S());
@@ -3235,9 +3273,9 @@ function showTab(t) {
     b.tabIndex = sel ? 0 : -1;
   }
   try {
-    localStorage.setItem('focus.tab', t);
+    if (!DEMO) localStorage.setItem('focus.tab', t);
   } catch {}
-  appEl.classList.remove('chrome-hidden');
+  appEl.classList.remove('chrome-hidden', 'immersive');
   fit();
   if (t === 'home') home.refresh();
   if (t === 'stats') stats.refresh();
@@ -3467,18 +3505,38 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'e') openEditor();
 });
 
-/* ---------- focus mode: hide the chrome while a clock runs ---------- */
+/* ---------- full-screen clock while running ----------
+   A few seconds after a clock starts, the buttons fade out and are then removed so the
+   cards can grow to cover the screen. Tapping anywhere brings the options back. */
 
 let hideTimer = 0;
+let fullTimer = 0;
+let sizingTimer = 0;
 let swallowClick = false;
+
+function setImmersive(on) {
+  if (appEl.classList.contains('immersive') === on) return;
+  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the cards growing/shrinking
+  appEl.classList.toggle('immersive', on);
+  fit();
+  clearTimeout(sizingTimer);
+  sizingTimer = setTimeout(() => {
+    clockEl.classList.remove('sizing');
+    for (const a of clockEl.getAnimations()) if (a.transitionProperty) a.finish();
+  }, 600);
+}
 
 function poke() {
   appEl.classList.remove('chrome-hidden');
+  setImmersive(false);
   clearTimeout(hideTimer);
+  clearTimeout(fullTimer);
   if (S().autoHide && isModeTab() && engine.running()) {
     hideTimer = setTimeout(() => {
-      if (isModeTab() && engine.running() && !overlayOpen()) appEl.classList.add('chrome-hidden');
-    }, 4000);
+      if (!isModeTab() || !engine.running() || overlayOpen()) return;
+      appEl.classList.add('chrome-hidden');
+      fullTimer = setTimeout(() => appEl.classList.contains('chrome-hidden') && setImmersive(true), 450);
+    }, 3500);
   }
 }
 
@@ -3572,6 +3630,10 @@ if (!TABS.includes(startTab)) {
 applyTheme();
 showTab(startTab);
 applyAll();
+// Demo only (store screenshots): ?demo&scroll opens Home scrolled to the dashboard.
+if (DEMO && new URLSearchParams(location.search).has('scroll')) {
+  setTimeout(() => ($('.view-home').scrollTop = $('.home-bento').offsetTop - 14), 400);
+}
 setInterval(frame, 150);
 initPWA();
 return {  };

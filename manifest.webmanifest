@@ -1,80 +1,35 @@
 {
   "name": "Focus — Flip Clock Study Timer",
   "short_name": "Focus",
-  "description": "A flip-clock stopwatch, timer and Pomodoro that tracks how long you study every day.",
+  "description": "A flip-clock stopwatch, timer and Pomodoro that tracks how long you study every day. Goals, streaks, statistics and themes — all stored privately on your device.",
   "id": "./",
   "start_url": "./",
   "scope": "./",
+  "lang": "en",
+  "dir": "ltr",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#000000",
   "theme_color": "#000000",
-  "categories": [
-    "productivity",
-    "education",
-    "utilities"
-  ],
+  "categories": ["productivity", "education", "utilities"],
+  "launch_handler": { "client_mode": "focus-existing" },
   "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    { "src": "icons/icon-96.png", "sizes": "96x96", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "store/screenshot-1-home.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Big flip clock with today's progress" },
+    { "src": "store/screenshot-2-fullscreen.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Full-screen stopwatch" },
+    { "src": "store/screenshot-3-dashboard.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Goals, streaks and consistency" },
+    { "src": "store/screenshot-4-stats.png", "sizes": "1080x1920", "type": "image/png", "form_factor": "narrow", "label": "Statistics by day, week, month and year" },
+    { "src": "store/screenshot-wide.png", "sizes": "1920x1080", "type": "image/png", "form_factor": "wide", "label": "Focus on a big screen" }
   ],
   "shortcuts": [
-    {
-      "name": "Stopwatch",
-      "url": "./#stopwatch",
-      "icons": [
-        {
-          "src": "icons/icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    },
-    {
-      "name": "Timer",
-      "url": "./#timer",
-      "icons": [
-        {
-          "src": "icons/icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    },
-    {
-      "name": "Pomodoro",
-      "url": "./#pomodoro",
-      "icons": [
-        {
-          "src": "icons/icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    },
-    {
-      "name": "Statistics",
-      "short_name": "Stats",
-      "url": "./#stats",
-      "icons": [
-        {
-          "src": "icons/icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
-    }
+    { "name": "Stopwatch", "url": "./#stopwatch", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Timer", "url": "./#timer", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Pomodoro", "url": "./#pomodoro", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }] },
+    { "name": "Statistics", "short_name": "Stats", "url": "./#stats", "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }] }
   ]
 }

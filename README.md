@@ -6,6 +6,8 @@ like a normal app, works offline, and keeps all data on your device.
 **Open it:** <https://kamalish07.github.io/focus/>. On your phone, open the link and choose
 *Install app* (Android) or *Share → Add to Home Screen* (iPhone).
 
+**Google Play:** see [PLAY_STORE.md](PLAY_STORE.md). The store graphics and listing text are in `store/`.
+
 ## Features
 
 - **Bottom tab bar:** Home · Stopwatch · Timer · Pomodoro · Stats. It becomes a side rail when

@@ -1,6 +1,6 @@
 import { $, $$, pad, hms, clamp, fmtDur, fmtTime, luminance, MIN } from './util.js';
 import { themeColors, fontById } from './config.js';
-import { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor, sessionDur } from './store.js';
+import { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor, sessionDur, DEMO } from './store.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as bg from './background.js';
@@ -48,7 +48,7 @@ function applyTheme() {
   document.documentElement.dataset.scheme = luminance(t.bg) > 0.35 ? 'light' : 'dark';
   $('meta[name="theme-color"]').setAttribute('content', t.bg);
   try {
-    localStorage.setItem('focus.bg', t.bg);
+    if (!DEMO) localStorage.setItem('focus.bg', t.bg);
   } catch {}
 }
 
@@ -75,9 +75,13 @@ function applyOrientation() {
   appEl.classList.toggle('layout-col', !row);
 }
 
-/** Size the timer's cards to fill the space available, in a row or a column. */
+/**
+ * Size the timer's cards to fill the space available, in a row or a column.
+ * In full-screen mode the cards may stretch further so they cover the whole screen.
+ */
 function fitClock() {
   const row = appEl.classList.contains('layout-row');
+  const full = appEl.classList.contains('immersive');
   const n = Math.max(1, clock.cards.length);
   const W = clockEl.clientWidth;
   const H = clockEl.clientHeight;
@@ -88,13 +92,13 @@ function fitClock() {
   if (row) {
     gap = clamp(W * 0.018, 6, 22);
     cw = (W - gap * (n - 1)) / n;
-    ch = Math.min(H, cw * 1.02);
-    cw = Math.min(cw, ch * 1.12);
+    ch = Math.min(H, cw * (full ? 1.3 : 1.02));
+    cw = Math.min(cw, ch * (full ? 1.7 : 1.12));
   } else {
     gap = clamp(H * 0.022, 6, 18);
     ch = (H - gap * (n - 1)) / n;
-    cw = Math.min(W, ch * 1.35);
-    ch = Math.min(ch, cw);
+    cw = Math.min(W, ch * (full ? 2.2 : 1.35));
+    ch = Math.min(ch, cw * (full ? 1.35 : 1));
   }
   ch = Math.floor(ch / 2) * 2;
   sizeCards(clockEl, { cw: Math.floor(cw), ch, gap: Math.round(gap) }, metrics, S());
@@ -133,9 +137,9 @@ function showTab(t) {
     b.tabIndex = sel ? 0 : -1;
   }
   try {
-    localStorage.setItem('focus.tab', t);
+    if (!DEMO) localStorage.setItem('focus.tab', t);
   } catch {}
-  appEl.classList.remove('chrome-hidden');
+  appEl.classList.remove('chrome-hidden', 'immersive');
   fit();
   if (t === 'home') home.refresh();
   if (t === 'stats') stats.refresh();
@@ -365,18 +369,38 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'e') openEditor();
 });
 
-/* ---------- focus mode: hide the chrome while a clock runs ---------- */
+/* ---------- full-screen clock while running ----------
+   A few seconds after a clock starts, the buttons fade out and are then removed so the
+   cards can grow to cover the screen. Tapping anywhere brings the options back. */
 
 let hideTimer = 0;
+let fullTimer = 0;
+let sizingTimer = 0;
 let swallowClick = false;
+
+function setImmersive(on) {
+  if (appEl.classList.contains('immersive') === on) return;
+  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the cards growing/shrinking
+  appEl.classList.toggle('immersive', on);
+  fit();
+  clearTimeout(sizingTimer);
+  sizingTimer = setTimeout(() => {
+    clockEl.classList.remove('sizing');
+    for (const a of clockEl.getAnimations()) if (a.transitionProperty) a.finish();
+  }, 600);
+}
 
 function poke() {
   appEl.classList.remove('chrome-hidden');
+  setImmersive(false);
   clearTimeout(hideTimer);
+  clearTimeout(fullTimer);
   if (S().autoHide && isModeTab() && engine.running()) {
     hideTimer = setTimeout(() => {
-      if (isModeTab() && engine.running() && !overlayOpen()) appEl.classList.add('chrome-hidden');
-    }, 4000);
+      if (!isModeTab() || !engine.running() || overlayOpen()) return;
+      appEl.classList.add('chrome-hidden');
+      fullTimer = setTimeout(() => appEl.classList.contains('chrome-hidden') && setImmersive(true), 450);
+    }, 3500);
   }
 }
 
@@ -470,5 +494,9 @@ if (!TABS.includes(startTab)) {
 applyTheme();
 showTab(startTab);
 applyAll();
+// Demo only (store screenshots): ?demo&scroll opens Home scrolled to the dashboard.
+if (DEMO && new URLSearchParams(location.search).has('scroll')) {
+  setTimeout(() => ($('.view-home').scrollTop = $('.home-bento').offsetTop - 14), 400);
+}
 setInterval(frame, 150);
 initPWA();

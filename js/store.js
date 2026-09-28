@@ -101,7 +101,41 @@ function normalize(d) {
   return { v: 3, settings, cats: cats.length ? cats : def.cats, sessions, runners };
 }
 
+/** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
+export const DEMO = new URLSearchParams(location.search).has('demo');
+
+function demoData() {
+  const d = defaults();
+  Object.assign(d.settings, { seenTip: true, askedNotif: true });
+  d.cats = [
+    { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
+    { id: 'math', name: 'Math', color: PALETTE[1], goal: 60 },
+    { id: 'read', name: 'Reading', color: PALETTE[2], goal: 30 },
+  ];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const today = new Date();
+  for (let back = 1; back <= 150; back++) {
+    if (rnd() < 0.18) continue;
+    let t = new Date(today.getFullYear(), today.getMonth(), today.getDate() - back, 9).getTime();
+    for (const c of d.cats) {
+      if (rnd() < 0.3) continue;
+      const dur = Math.round((20 + rnd() * (c.id === 'study' ? 160 : 50)) * MIN);
+      d.sessions.push({ id: `d${back}${c.id}`, cat: c.id, mode: ['stopwatch', 'timer', 'pomodoro'][Math.floor(rnd() * 3)], start: t, segs: [[t, t + dur]], adj: 0, run: null, note: '' });
+      t += dur + 40 * MIN;
+    }
+  }
+  const n = Date.now();
+  d.sessions.push({ id: 'dt1', cat: 'study', mode: 'pomodoro', start: n - 200 * MIN, segs: [[n - 200 * MIN, n - 150 * MIN]], adj: 0, run: null, note: 'Organic chemistry' });
+  d.sessions.push({ id: 'dt2', cat: 'math', mode: 'timer', start: n - 130 * MIN, segs: [[n - 130 * MIN, n - 85 * MIN]], adj: 0, run: null, note: 'Problem set 4' });
+  const st = n - 47 * MIN - 12000;
+  d.sessions.push({ id: 'dlive', cat: 'study', mode: 'stopwatch', start: st, segs: [], adj: 0, run: st, note: '' });
+  Object.assign(d.runners.stopwatch, { runStart: st, sid: 'dlive', touched: st });
+  return d;
+}
+
 function load() {
+  if (DEMO) return normalize(demoData());
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) return normalize(JSON.parse(raw));
@@ -138,7 +172,7 @@ export function save() {
   clearTimeout(saveTimer);
   cache = null;
   try {
-    localStorage.setItem(KEY, JSON.stringify(data));
+    if (!DEMO) localStorage.setItem(KEY, JSON.stringify(data));
   } catch (e) {
     console.warn('Focus: could not save', e);
   }

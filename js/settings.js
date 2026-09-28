@@ -101,7 +101,7 @@ export function openSettings() {
         row('Show', segEl('format', s.format, [['auto', 'Auto'], ['hms', 'H M S'], ['hm', 'H M']], 'Digits shown'), 'Auto: minutes and seconds first, the hours card joins after an hour') +
           row('Stopwatch shows', segEl('display', s.display, [['session', 'Session'], ['today', 'Today']], 'Stopwatch shows'), 'This session, or everything today in the category') +
           row('Layout', segEl('layout', s.layout, [['auto', 'Auto'], ['row', 'Wide'], ['col', 'Tall']], 'Layout')) +
-          row('Hide buttons while running', switchEl('autoHide', s.autoHide, 'Hide buttons while running'), 'Tap anywhere to bring them back')
+          row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'Buttons hide and the cards fill the screen. Tap anywhere for options.')
       )}
 
       ${group(
@@ -167,7 +167,7 @@ export function openSettings() {
         'pad'
       )}
 
-      ${group('App', installRow() + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
+      ${group('App', installRow() + row('Privacy', '<a class="btn sm" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>', 'Your data stays on this device') + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
       <p class="footnote">Keys: 1–5 switch tabs · Space start/pause · R reset · E edit</p>`;
   }
 

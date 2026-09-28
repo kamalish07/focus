@@ -94,9 +94,38 @@ svg.i { width: 22px; height: 22px; display: block; flex: none; }
 .app:not(.landscape) .view-home, .app:not(.landscape) .view-stats { padding-left: calc(env(safe-area-inset-left) + 16px); }
 
 .chrome, .controls { transition: opacity .45s ease; }
-.app.chrome-hidden .chrome { opacity: 0; pointer-events: none; }
-.app.chrome-hidden .controls { opacity: .28; }
+.app.chrome-hidden .chrome, .app.chrome-hidden .view-clock .controls { opacity: 0; pointer-events: none; }
 .app.chrome-hidden { cursor: none; }
+
+/* Full-screen clock: everything but the cards is removed; tap anywhere to bring it back. */
+.app.immersive .tabbar,
+.app.immersive .view-clock .topbar,
+.app.immersive .view-clock .info,
+.app.immersive .view-clock .controls { display: none; }
+.app.immersive .view-clock {
+  gap: 0;
+  padding:
+    calc(env(safe-area-inset-top) + 8px)
+    calc(env(safe-area-inset-right) + 8px)
+    calc(env(safe-area-inset-bottom) + 8px)
+    calc(env(safe-area-inset-left) + 8px);
+}
+.app.immersive .stage { gap: 0; }
+
+/* Card geometry is animatable so the cards grow smoothly into full screen. */
+@property --cw { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --ch { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --fs { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --fs3 { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --dy { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --dy3 { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --r { syntax: '<length>'; inherits: true; initial-value: 0px; }
+@property --gap { syntax: '<length>'; inherits: true; initial-value: 12px; }
+.clock.sizing {
+  transition: --cw .5s cubic-bezier(.2, .8, .2, 1), --ch .5s cubic-bezier(.2, .8, .2, 1), --fs .5s cubic-bezier(.2, .8, .2, 1),
+    --fs3 .5s cubic-bezier(.2, .8, .2, 1), --dy .5s cubic-bezier(.2, .8, .2, 1), --dy3 .5s cubic-bezier(.2, .8, .2, 1),
+    --r .5s cubic-bezier(.2, .8, .2, 1), --gap .5s cubic-bezier(.2, .8, .2, 1);
+}
 
 /* bottom tab bar (a side rail when the phone is sideways) */
 .tabbar {
@@ -722,3 +751,5 @@ body:has(.app.landscape) .toast { bottom: calc(env(safe-area-inset-bottom) + 20p
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+a.btn { text-decoration: none; }
