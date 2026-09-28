@@ -173,7 +173,7 @@ export function openCategories() {
 
 export function openCategoryEditor(cat, onDone) {
   const isNew = !cat;
-  const c = cat ? { ...cat } : { id: uid(), name: '', color: nextColor(), goal: 60 };
+  const c = cat ? { ...cat } : { id: uid(), name: '', color: nextColor(), goal: 0 }; // goals are optional
   const canDelete = !isNew && data.cats.length > 1;
   const sh = sheet({
     title: isNew ? 'New category' : 'Edit category',

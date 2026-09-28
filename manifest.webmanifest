@@ -1,7 +1,7 @@
 {
-  "name": "Focus — Flip Clock Study Timer",
+  "name": "Focus: Flip Clock Study Timer",
   "short_name": "Focus",
-  "description": "A flip-clock stopwatch, timer and Pomodoro that tracks how long you study every day. Goals, streaks, statistics and themes — all stored privately on your device.",
+  "description": "A flip-clock stopwatch, timer and Pomodoro that tracks how long you study every day. Goals, streaks, statistics and themes, all stored privately on your device.",
   "id": "./",
   "start_url": "./",
   "scope": "./",

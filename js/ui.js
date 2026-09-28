@@ -203,19 +203,74 @@ export const confirmDialog = ({ title, message = '', ok = 'OK', cancel = 'Cancel
 /* ---------- toast ---------- */
 
 let toastTimer = 0;
-export function toast(msg, { action, onAction, ms = 3200 } = {}) {
+let toastSwipeReady = false;
+
+function hideToast(t, flyTo) {
+  clearTimeout(toastTimer);
+  if (!flyTo) return t.classList.remove('show');
+  t.style.transition = 'transform .22s ease, opacity .22s ease';
+  t.style.transform = flyTo;
+  t.style.opacity = '0';
+  setTimeout(() => {
+    t.classList.remove('show');
+    t.style.transition = t.style.transform = t.style.opacity = '';
+  }, 230);
+}
+
+/** Drag a toast in any direction to throw it away, or tap it to dismiss. */
+function setupToastSwipe(t) {
+  let x0 = null;
+  let y0 = 0;
+  let dx = 0;
+  let dy = 0;
+  t.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    x0 = e.clientX;
+    y0 = e.clientY;
+    dx = dy = 0;
+    t.style.transition = 'none';
+    clearTimeout(toastTimer);
+    try {
+      t.setPointerCapture(e.pointerId);
+    } catch {}
+  });
+  t.addEventListener('pointermove', (e) => {
+    if (x0 == null) return;
+    dx = e.clientX - x0;
+    dy = e.clientY - y0;
+    t.style.transform = `translate(${dx}px, ${dy}px)`;
+    t.style.opacity = String(Math.max(0.2, 1 - Math.hypot(dx, dy) / 220));
+  });
+  const end = () => {
+    if (x0 == null) return;
+    x0 = null;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 8) return hideToast(t); // a tap
+    if (dist > 45) return hideToast(t, `translate(${(dx / dist) * 420}px, ${(dy / dist) * 420}px)`);
+    t.style.transition = t.style.transform = t.style.opacity = ''; // not far enough: spring back
+    toastTimer = setTimeout(() => hideToast(t), 2500);
+  };
+  t.addEventListener('pointerup', end);
+  t.addEventListener('pointercancel', end);
+}
+
+export function toast(msg, { action, onAction, ms = 2800 } = {}) {
   const t = $('#toast');
+  if (!toastSwipeReady) {
+    toastSwipeReady = true;
+    setupToastSwipe(t);
+  }
+  t.style.transition = t.style.transform = t.style.opacity = '';
   t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button>${esc(action)}</button>` : ''}`;
-  const hide = () => t.classList.remove('show');
   if (action) {
     t.querySelector('button').onclick = () => {
-      hide();
+      hideToast(t);
       onAction?.();
     };
   }
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hide, action ? Math.max(ms, 5500) : ms);
+  toastTimer = setTimeout(() => hideToast(t), action ? Math.max(ms, 4500) : ms);
 }
 
 /* ---------- scroll-wheel number picker ---------- */

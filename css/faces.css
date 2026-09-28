@@ -189,6 +189,19 @@
 
 .hero-head .topbar-right { display: flex; gap: 2px; }
 
+/* Toasts sit at the top so they never cover the clock's buttons; swipe or tap to dismiss. */
+.toast { top: calc(env(safe-area-inset-top) + 12px); bottom: auto; transform: translateY(-170%); touch-action: none; cursor: grab; }
+body:has(.app.landscape) .toast { bottom: auto; }
+.toast.show { transform: none; }
+
+/* The line under the clock is optional (Settings → Display → Details under the clock). */
+.app:not(.show-info) .view-clock .info { display: none; }
+
+/* Today card */
+.goal-chip { margin-top: 12px; height: 32px; padding: 0 12px; font-size: 13px; gap: 6px; }
+.goal-chip svg.i { width: 15px; height: 15px; }
+.ring-center-sub { font: 600 10px var(--ui-font); fill: var(--muted); letter-spacing: .04em; }
+
 @media (prefers-reduced-motion: reduce) {
   .au-bg i, .mn.aurora .mn-g { animation: none !important; }
 }

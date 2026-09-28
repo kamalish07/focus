@@ -23,7 +23,7 @@ any other app. Updates you push to GitHub reach Play users automatically, with n
 1. Open https://www.pwabuilder.com and enter `https://kamalish07.github.io/focus/`.
 2. Choose **Package for stores → Android → Generate package** and set:
    - Package ID: `io.github.kamalish07.focus`
-   - App name: `Focus – Flip Clock Study Timer`, launcher name: `Focus`
+   - App name: `Focus: Flip Clock Study Timer`, launcher name: `Focus`
    - Version code `1`, version name `1.0.0`
    - Theme and background colour `#000000`, navigation bar colour `#000000`
    - Signing key: **Create new**
@@ -47,7 +47,7 @@ SHA-256** to the same file too. Play re-signs the app with that key.
 
 ## 4. Create the app in Play Console
 
-1. **Create app** → name "Focus – Flip Clock Study Timer", App, Free.
+1. **Create app** → name "Focus: Flip Clock Study Timer", App, Free.
 2. **Store listing**: paste the text and upload the graphics from `store/`.
 3. **App content**: privacy policy URL, ads (none), data safety (no data collected), content rating,
    target audience. The answers are in `store/listing.md`.

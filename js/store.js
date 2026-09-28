@@ -39,7 +39,8 @@ export const DEFAULT_SETTINGS = {
   minSave: 30, // seconds; shorter sessions are not kept
   cat: 'study',
   seenTip: false,
-  bgSound: 'silent', // off | silent | brown | pink | white — keeps the app alive with the screen off
+  showInfo: false, // the line under the clock (start time, today's total)
+  bgSound: 'silent', // off | silent | brown | pink | white; keeps the app alive with the screen off
   ambientVol: 0.5,
   clock24: null, // null = follow the phone's setting
   clockSeconds: false,
@@ -68,9 +69,9 @@ export function freshRunner(mode = 'stopwatch', s = DEFAULT_SETTINGS) {
 
 function defaults() {
   return {
-    v: 3,
+    v: 4,
     settings: structuredClone(DEFAULT_SETTINGS),
-    cats: [{ id: 'study', name: 'Study', color: PALETTE[0], goal: 180 }],
+    cats: [{ id: 'study', name: 'Study', color: PALETTE[0], goal: 0 }], // goals are optional
     sessions: [],
     runners: Object.fromEntries(MODES.map((m) => [m, freshRunner(m)])),
   };
@@ -82,6 +83,8 @@ function normalize(d) {
   const settings = { ...def.settings, ...(d.settings || {}) };
   // Version 3: clocks start as MM SS and add the hours card after an hour.
   if ((d.v || 1) < 3 && settings.format === 'hms') settings.format = 'auto';
+  // Version 4: goals are opt-in. Clear the 3-hour goal that used to be set by default (only if untouched).
+  if ((d.v || 1) < 4) for (const c of d.cats || []) if (c && c.id === 'study' && c.goal === 180) c.goal = 0;
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id) : [];
@@ -109,7 +112,7 @@ function normalize(d) {
       s.run = null;
     }
   }
-  return { v: 3, settings, cats: cats.length ? cats : def.cats, sessions, runners };
+  return { v: 4, settings, cats: cats.length ? cats : def.cats, sessions, runners };
 }
 
 /** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
@@ -120,11 +123,13 @@ function demoData() {
   Object.assign(d.settings, { seenTip: true, askedNotif: true });
   const face = new URLSearchParams(location.search).get('face');
   if (face) d.settings.face = face;
+  const noGoal = new URLSearchParams(location.search).has('nogoal');
   d.cats = [
     { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
     { id: 'math', name: 'Math', color: PALETTE[1], goal: 60 },
     { id: 'read', name: 'Reading', color: PALETTE[2], goal: 30 },
   ];
+  if (noGoal) for (const c of d.cats) c.goal = 0;
   let seed = 7;
   const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const today = new Date();
@@ -158,7 +163,7 @@ function load() {
   return defaults();
 }
 
-// Never reassigned — replaced in place — so every module can hold on to it.
+// Never reassigned (replaced in place), so every module can hold on to it.
 export const data = load();
 
 function setData(obj) {

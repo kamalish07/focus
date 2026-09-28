@@ -98,7 +98,7 @@ export function mountStats(root, { visible = () => true } = {}) {
     const withYear = b.getFullYear() !== thisYear ? { year: 'numeric' } : {};
     const left = a.toLocaleDateString([], { month: 'short', day: 'numeric' });
     const right = b.toLocaleDateString([], a.getMonth() === b.getMonth() ? { day: 'numeric', ...withYear } : { month: 'short', day: 'numeric', ...withYear });
-    return `${left} – ${right}`;
+    return `${left} to ${right}`;
   }
 
   function render() {
@@ -149,14 +149,14 @@ export function mountStats(root, { visible = () => true } = {}) {
         ${
           goal
             ? `<div class="meter" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
-               <div class="hero-sub">${pct >= 100 ? 'Goal reached — nice work!' : `${Math.round(pct)}% of your ${fmtDur(goal)} goal`}</div>`
+               <div class="hero-sub">${pct >= 100 ? 'Goal reached, nice work!' : `${Math.round(pct)}% of your ${fmtDur(goal)} goal`}</div>`
             : '<div class="hero-sub">No daily goal set</div>'
         }
       </section>
       <div class="tiles g-m">
         <div class="tile"><div class="tile-label">Total</div><div class="tile-value">${fmtDur(total)}</div></div>
         <div class="tile"><div class="tile-label">Daily average</div><div class="tile-value">${fmtDur(avg)}</div></div>
-        <div class="tile"><div class="tile-label">Best day</div><div class="tile-value">${best.ms ? fmtDur(best.ms) : '—'}</div>${best.k ? `<div class="tile-sub">${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</div>` : ''}</div>
+        <div class="tile"><div class="tile-label">Best day</div><div class="tile-value">${best.ms ? fmtDur(best.ms) : '0m'}</div>${best.k ? `<div class="tile-sub">${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</div>` : ''}</div>
         <div class="tile"><div class="tile-label">Streak</div><div class="tile-value">${days} ${days === 1 ? 'day' : 'days'}</div></div>
       </div>
       <section class="chart-card">
@@ -300,7 +300,7 @@ export function mountStats(root, { visible = () => true } = {}) {
     const c = catById(s.cat);
     const live = engine.isOpenSession(s.id);
     const end = sessionEnd(s, now);
-    const when = end - s.start >= MIN ? `${fmtTime(s.start)} – ${fmtTime(end)}` : fmtTime(s.start);
+    const when = end - s.start >= MIN ? `${fmtTime(s.start)} to ${fmtTime(end)}` : fmtTime(s.start);
     return `<button class="sess" data-sess="${esc(s.id)}">
         <span class="dot" style="--c:${esc(c.color)}"></span>
         <span class="sess-main">

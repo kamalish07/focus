@@ -1,7 +1,7 @@
 // Clock faces. Every face shows a list of digit groups (e.g. ['47', '19']) and sizes itself
 // to the box it's given. Flip is the original split-flap clock; the others are alternatives.
 //
-// makeFace(el, type, ctx) — ctx can override the font and settings (used by template previews).
+// makeFace(el, type, ctx): ctx can override the font and settings (used by template previews).
 // face.render(groups, { animate, running, progress, label, ms, date })
 // face.fit({ W, H, row, stretch })
 import { FlipClock, fontMetrics, sizeCards } from './flip.js';

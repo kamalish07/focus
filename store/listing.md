@@ -1,7 +1,7 @@
 # Google Play store listing (copy and paste)
 
 **App name** (max 30 characters)
-Focus – Flip Clock Study Timer
+Focus: Flip Clock Study Timer
 
 **Short description** (max 80 characters)
 Flip-clock stopwatch, timer & Pomodoro that tracks your daily study time.
@@ -11,15 +11,15 @@ Flip-clock stopwatch, timer & Pomodoro that tracks your daily study time.
 Focus turns your phone into a beautiful split-flap clock that keeps you studying and shows how far you've come.
 
 ⏱ THREE WAYS TO FOCUS
-• Stopwatch – count up while you study; tap the clock to fix the time if you forgot to start it.
-• Timer – pick a length, get an alarm when it ends, add 5 more minutes with one tap.
-• Pomodoro – focus and break cycles with auto-start, long breaks and round tracking.
+• Stopwatch: count up while you study; tap the clock to fix the time if you forgot to start it.
+• Timer: pick a length, get an alarm when it ends, add 5 more minutes with one tap.
+• Pomodoro: focus and break cycles with auto-start, long breaks and round tracking.
 
 🔳 A CLOCK THAT FILLS THE SCREEN
 Nine clock styles: Flip (a real split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix, Nixie tubes, Ring and a classic Analog dial. Start from 16 ready-made looks like Retro Nixie, Neon Night, Bedside LED or Wristwatch, then customise colours, glow, fonts and more. After a few seconds the buttons slide away and the clock covers the whole screen, upright or sideways. Tap anywhere for floating controls.
 
 📊 SEE YOUR PROGRESS
-• Daily goals per subject with progress rings
+• Today's time by subject, with optional daily goals and progress rings
 • Streaks, this week vs last week, monthly totals and daily average
 • A consistency heatmap of the last six months
 • Week, month and year charts, plus a full session log you can edit

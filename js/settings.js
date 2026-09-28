@@ -174,7 +174,8 @@ export function openSettings({ customize = false } = {}) {
           row('Show', segEl('format', s.format, [['auto', 'Auto'], ['hms', 'H M S'], ['hm', 'H M']], 'Digits shown'), 'Auto: minutes and seconds first, the hours join after an hour') +
             row('Stopwatch shows', segEl('display', s.display, [['session', 'Session'], ['today', 'Today']], 'Stopwatch shows'), 'This session, or everything today in the category') +
             row('Layout', segEl('layout', s.layout, [['auto', 'Auto'], ['row', 'Wide'], ['col', 'Tall']], 'Layout')) +
-            row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'The clock fills the screen. Tap anywhere for controls.')
+            row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'The clock fills the screen. Tap anywhere for controls.') +
+            row('Details under the clock', switchEl('showInfo', !!s.showInfo, 'Details under the clock'), 'Start or end time and today’s total')
         )}
         ${group('Home clock', row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds')))}
       </div>
@@ -240,7 +241,7 @@ export function openSettings({ customize = false } = {}) {
           'pad'
         )}
         ${group('App', installRow() + row('Privacy', '<a class="btn sm" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>', 'Your data stays on this device') + row('Version', `<span class="muted">${APP_VERSION}</span>`))}
-        <p class="footnote">Keys: 1–5 switch tabs · Space start/pause · R reset · E edit · F full screen</p>
+        <p class="footnote">Keys: 1 to 5 switch tabs · Space start/pause · R reset · E edit · F full screen</p>
       </div>`;
   }
 

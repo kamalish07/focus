@@ -1,4 +1,4 @@
-# Focus — flip-clock study timer
+# Focus: flip-clock study timer
 
 A Focusmeter-style app for tracking how long you study each day. It installs on your phone
 like a normal app, works offline, and keeps all data on your device.
@@ -12,8 +12,8 @@ like a normal app, works offline, and keeps all data on your device.
 
 - **Bottom tab bar:** Home · Stopwatch · Timer · Pomodoro · Stats. It becomes a side rail when
   the phone is sideways. Each mode keeps its own clock, and starting one pauses any other.
-- **Home:** a big flip clock with the current time, the clock you're running, goal rings for
-  today, streak, this week vs last week, a week chart, a consistency heatmap and recent sessions.
+- **Home:** a big flip clock with the current time, the clock you're running, today's time
+  by category (with optional goal rings), a week chart, a consistency heatmap and recent sessions.
 - **Nine clock styles:** Flip (split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix,
   Nixie tubes, Ring and Analog. Vertical on phones, horizontal in landscape.
 - **16 ready-made looks** (the palette button on the clock or Home), plus *Customize further*:

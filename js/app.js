@@ -118,6 +118,7 @@ function applyAll() {
   }
   applyTheme();
   applyLook();
+  appEl.classList.toggle('show-info', !!S().showInfo);
   document.body.classList.toggle('no-hinge', !S().hinge);
   audio.setVolume(S().volume);
   applyFont();
@@ -360,7 +361,7 @@ function onReset() {
   if (!s) return;
   const undo = { action: 'Undo', onAction: () => engine.undoReset(info) };
   if (info.kept) toast(`Saved ${fmtDur(sessionDur(s))} to ${catById(s.cat).name}`, undo);
-  else toast(`Not saved — shorter than ${S().minSave}s`, undo);
+  else toast(`Too short to save (under ${S().minSave}s)`, undo);
 }
 
 playBtn.addEventListener('click', () => togglePlay());
