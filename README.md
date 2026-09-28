@@ -16,7 +16,8 @@ like a normal app, works offline, and keeps all data on your device.
   time by category (with an optional daily goal), a week chart, a consistency heatmap and
   recent sessions.
 - **Nine clock styles:** Flip (split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix,
-  Nixie tubes, Ring and Analog. Vertical on phones, horizontal in landscape.
+  Nixie tubes, Ring and Analog. Vertical on phones, horizontal in landscape. Home can use a
+  different style from the stopwatch and timers.
 - **16 ready-made looks:** the palette button shows four favourites and the colour theme.
   *More looks* opens every template plus per-style colour, glow, unlit segments, tick marks,
   flip speed, card depth, aurora palette, your own colours, font, digit size and a background
@@ -30,8 +31,10 @@ like a normal app, works offline, and keeps all data on your device.
   screen shows the clock with play/pause.
 - **Edit anything:** tap the clock (or ✎) to change the stopwatch time, the timer length, or
   the time left. Add, edit or delete past sessions in Statistics.
-- **Categories** (Study, Math, Reading…) with colours and daily goals.
-- **Statistics:** today vs goal, week/month/year charts, daily average, best day, streak,
+- **Categories are optional:** pick *No category* to simply time something, or use categories
+  (Study, Math, Reading…) with colours and goals. Deleting one (from the category sheet,
+  Settings or Statistics) lets you keep its time as *No category* or delete it, with Undo.
+- **Statistics:** week/month/year totals and charts, daily average, best day, streak,
   per-category breakdown and a session log.
 - **Customise:** 10 themes plus custom colours, 10 digit fonts, digit size, corner roundness,
   hinge line, flip animation and sound, H·M·S / H·M / auto display, layout, alarm sounds,

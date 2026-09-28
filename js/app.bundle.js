@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.9.0';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -191,10 +191,14 @@ const { MIN, pad } = __m.util;
 
 const KEY = 'focus.v1';
 
+/** Time can be logged without a category; it's grouped under this id. */
+const NONE = 'none';
+
 const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
-  face: 'flip', // see FACES in faces.js
+  face: 'flip', // see FACES in faces.js (stopwatch, timer and Pomodoro)
+  homeFace: 'same', // Home's clock: 'same' as the timers, or a face of its own
   template: 'classic', // last template applied; null once you customise
   faceColor: 'auto',
   glow: 0.6,
@@ -225,7 +229,7 @@ const DEFAULT_SETTINGS = {
   weekStart: 1,
   dayStart: 0, // hour a new "day" begins, for night owls
   minSave: 30, // seconds; shorter sessions are not kept
-  cat: 'study',
+  cat: 'study', // current category, or NONE to log without one
   seenTip: false,
   showInfo: false, // the line under the clock (start time, today's total)
   bgSound: 'silent', // off | silent | brown | pink | white; keeps the app alive with the screen off
@@ -277,7 +281,9 @@ function normalize(d) {
   if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
-  const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id) : [];
+  // Categories are optional: an empty list is fine (everything is then "No category").
+  const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
+  if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
   const sessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
   const ids = new Set(sessions.map((s) => s.id));
 
@@ -302,7 +308,7 @@ function normalize(d) {
       s.run = null;
     }
   }
-  return { v: 5, settings, cats: cats.length ? cats : def.cats, sessions, runners };
+  return { v: 5, settings, cats, sessions, runners };
 }
 
 /** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
@@ -401,17 +407,23 @@ const resetAll = () => setData(defaults());
 
 /* ---------- categories ---------- */
 
+const NO_CAT = Object.freeze({ id: NONE, name: 'No category', color: '#8e8e93', goal: 0, none: true });
+
 const catById = (id) =>
-  data.cats.find((c) => c.id === id) || { id, name: 'Deleted', color: '#6b6b6b', goal: 0, missing: true };
+  !id || id === NONE ? NO_CAT : data.cats.find((c) => c.id === id) || { id, name: 'Deleted', color: '#6b6b6b', goal: 0, missing: true };
 
 function currentCat() {
+  if (data.settings.cat === NONE) return NO_CAT;
   let c = data.cats.find((x) => x.id === data.settings.cat);
   if (!c) {
-    c = data.cats[0];
+    c = data.cats[0] || NO_CAT;
     data.settings.cat = c.id;
   }
   return c;
 }
+
+/** Has any time been logged without a category? */
+const usesNone = () => data.sessions.some((s) => s.cat === NONE);
 
 /** Daily goal in ms for a category, or the overall daily goal (all categories) when catId is null. 0 = no goal. */
 function goalFor(catId) {
@@ -593,7 +605,7 @@ function streak(catId = null, now = Date.now()) {
   }
   return n;
 }
-return { DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, on, emit, save, saveSoon, replaceAll, resetAll, catById, currentCat, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
+return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, on, emit, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
 })();
 
 // ---------- engine.js ----------
@@ -1148,7 +1160,7 @@ function lockScreen(m, now, isRunning) {
     try {
       ms.metadata = new MediaMetadata({
         title,
-        artist: cat.name,
+        artist: cat.none ? 'Focus' : cat.name,
         album: 'Focus',
         artwork: [
           { src: abs('icons/icon-192.png'), sizes: '192x192', type: 'image/png' },
@@ -1385,6 +1397,11 @@ const FACES = [
   ['ring', 'Ring'],
   ['analog', 'Analog'],
 ];
+
+/** Home can have a clock style of its own; 'same' follows the stopwatch, timer and Pomodoro. */
+function homeFaceType(s = data.settings) {
+  return s.homeFace && s.homeFace !== 'same' && FACES.some(([id]) => id === s.homeFace) ? s.homeFace : s.face;
+}
 
 const FLIP_SPEED = { slow: 900, normal: 620, fast: 380 };
 const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
@@ -1821,7 +1838,7 @@ function analogFace(el) {
     },
   };
 }
-return { FACES, makeFace };
+return { FACES, homeFaceType, makeFace };
 })();
 
 // ---------- ui.js ----------
@@ -1994,7 +2011,7 @@ function swipeToClose(ov, onClose) {
   }
 }
 
-function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, primary: true }], dismissValue = null }) {
+function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, primary: true }], dismissValue = null, stack = false }) {
   return new Promise((resolve) => {
     let result = dismissValue;
     const ov = document.createElement('div');
@@ -2002,7 +2019,7 @@ function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, pr
     ov.innerHTML = `<div class="backdrop" data-dismiss></div>
       <section class="panel" role="alertdialog" aria-modal="true" aria-label="${esc(title)}">
         <h3>${esc(title)}</h3>${message ? `<p>${esc(message)}</p>` : ''}
-        <div class="dialog-actions">${buttons
+        <div class="dialog-actions${stack ? ' stack' : ''}">${buttons
           .map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}${b.danger ? ' danger-fill' : ''}" data-i="${i}">${esc(b.label)}</button>`)
           .join('')}</div>
       </section>`;
@@ -2270,10 +2287,10 @@ return { icon, canVibrate, haptic, overlayOpen, sheet, dialog, confirmDialog, to
 
 // ---------- sheets.js ----------
 __m.sheets = (() => {
-const { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, nextColor } = __m.store;
+const { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, nextColor, NONE } = __m.store;
 const { PALETTE, TIMER_PRESETS } = __m.config;
 const engine = __m.engine;
-const { sheet, icon, toast, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } = __m.ui;
+const { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } = __m.ui;
 const { esc, fmtDur, pad, uid, getPath, setPath, MIN, HOUR, SEC } = __m.util;
 
 const minus = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
@@ -2444,9 +2461,10 @@ function openGoalSheet(onDone) {
 
 /* ---------- categories ---------- */
 
+/** "No category" first, then your categories. */
 function openCategories() {
   const sh = sheet({
-    title: 'Categories',
+    title: 'Category',
     body: `<div class="cat-list"></div><button class="btn block ghost" data-new>${icon('plus')}<span>New category</span></button>
       <p class="hint small center">Tap ${icon('edit', 'inline')} to rename, recolour or delete a category.</p>`,
   });
@@ -2454,16 +2472,16 @@ function openCategories() {
   const draw = () => {
     const day = dayData(dayKey(Date.now()));
     const sel = currentCat().id;
-    list.innerHTML = data.cats
+    list.innerHTML = [catById(NONE), ...data.cats]
       .map(
-        (c) => `<div class="cat-row${c.id === sel ? ' sel' : ''}">
+        (c) => `<div class="cat-row${c.id === sel ? ' sel' : ''}${c.none ? ' none' : ''}">
           <button class="cat-pick" data-pick="${esc(c.id)}">
             <span class="dot" style="--c:${esc(c.color)}"></span>
-            <span class="cat-name">${esc(c.name)}</span>
+            <span class="cat-name">${esc(c.name)}${c.none ? '<small>Just time it</small>' : ''}</span>
             <span class="cat-meta">${fmtDur(day.cats[c.id] || 0)}${c.goal ? ` / ${fmtDur(c.goal * MIN)}` : ''}</span>
             ${c.id === sel ? icon('check', 'cat-check') : ''}
           </button>
-          <button class="icon-btn" data-edit="${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}</button>
+          ${c.none ? '<span class="cat-edit-gap"></span>' : `<button class="icon-btn" data-edit="${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}</button>`}
         </div>`
       )
       .join('');
@@ -2476,7 +2494,7 @@ function openCategories() {
       const moved = engine.setCategory(id);
       haptic();
       sh.close();
-      if (moved) toast(`Current session moved to ${catById(id).name}`);
+      if (moved) toast(id === NONE ? 'Current session is now uncategorised' : `Current session moved to ${catById(id).name}`);
       return;
     }
     const ed = e.target.closest('[data-edit]');
@@ -2485,10 +2503,64 @@ function openCategories() {
   });
 }
 
+/**
+ * Deletes a category after asking. Its logged time can stay (as No category) or go with it.
+ * A clock running in it keeps running, uncategorised. Undo puts everything back.
+ * Resolves true once deleted.
+ */
+async function deleteCategory(cat, onDone) {
+  const open = new Set(engine.MODES.map((m) => engine.current(m)?.id).filter(Boolean));
+  const mine = data.sessions.filter((s) => s.cat === cat.id);
+  const closed = mine.filter((s) => !open.has(s.id));
+  let keep = true;
+  if (closed.length) {
+    const total = closed.reduce((a, s) => a + sessionDur(s), 0);
+    const choice = await dialog({
+      title: `Delete “${cat.name}”?`,
+      message: `It has ${closed.length} logged session${closed.length === 1 ? '' : 's'} (${fmtDur(total)}). Keep that time under No category, or delete it too?`,
+      buttons: [
+        { label: 'Keep the time', value: 'keep', primary: true },
+        { label: 'Delete the time too', value: 'all', danger: true },
+        { label: 'Cancel', value: null },
+      ],
+      stack: true,
+    });
+    if (!choice) return false;
+    keep = choice === 'keep';
+  } else if (!(await confirmDialog({ title: `Delete “${cat.name}”?`, message: 'It has no logged time.', ok: 'Delete', danger: true }))) {
+    return false;
+  }
+  const at = data.cats.findIndex((x) => x.id === cat.id);
+  if (at < 0) return false;
+  const [removed] = data.cats.splice(at, 1);
+  const dropped = keep ? [] : closed;
+  const relabelled = keep ? mine : mine.filter((s) => open.has(s.id));
+  if (dropped.length) {
+    const gone = new Set(dropped.map((s) => s.id));
+    data.sessions = data.sessions.filter((s) => !gone.has(s.id));
+  }
+  for (const s of relabelled) s.cat = NONE;
+  const wasCurrent = data.settings.cat === cat.id;
+  if (wasCurrent) data.settings.cat = NONE;
+  save();
+  onDone?.();
+  toast(`Deleted ${cat.name}`, {
+    action: 'Undo',
+    onAction: () => {
+      data.cats.splice(Math.min(at, data.cats.length), 0, removed);
+      data.sessions.push(...dropped);
+      for (const s of relabelled) if (s.cat === NONE) s.cat = cat.id;
+      if (wasCurrent && data.settings.cat === NONE) data.settings.cat = cat.id;
+      save();
+      onDone?.();
+    },
+  });
+  return true;
+}
+
 function openCategoryEditor(cat, onDone) {
   const isNew = !cat;
   const c = cat ? { ...cat } : { id: uid(), name: '', color: nextColor(), goal: 0 }; // goals are optional
-  const canDelete = !isNew && data.cats.length > 1;
   const sh = sheet({
     title: isNew ? 'New category' : 'Edit category',
     body: `<label class="field"><span class="field-label">Name</span>
@@ -2501,8 +2573,7 @@ function openCategoryEditor(cat, onDone) {
         <div class="row"><div class="row-label">Daily goal<small>Optional, just for this category</small></div>
           <div class="row-ctl">${stepperEl('goal', c.goal, { min: 0, max: 960, step: 15, fmt: 'goal' }, 'category goal')}</div></div>
       </div>
-      ${!isNew && !canDelete ? '<p class="hint small">This is your only category, so it can’t be deleted. You can rename it instead.</p>' : ''}
-      ${actions('Save', canDelete ? `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>` : '')}`,
+      ${actions('Save', isNew ? '' : `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>`)}`,
   });
   bindControls(sh.body, { get: () => c.goal, set: (k, v) => (c.goal = v) });
   const custom = sh.body.querySelector('.swatch.custom');
@@ -2529,24 +2600,7 @@ function openCategoryEditor(cat, onDone) {
       onDone?.();
       return;
     }
-    if (e.target.closest('[data-del]')) {
-      const n = data.sessions.filter((s) => s.cat === c.id).length;
-      const ok = await confirmDialog({
-        title: `Delete “${cat.name}”?`,
-        message: n ? `Its ${n} logged session${n === 1 ? '' : 's'} will be deleted too.` : 'This category has no logged time.',
-        ok: 'Delete',
-        danger: true,
-      });
-      if (!ok) return;
-      for (const m of engine.MODES) if (engine.current(m)?.cat === c.id) engine.discardCurrent(m);
-      data.sessions = data.sessions.filter((s) => s.cat !== c.id);
-      data.cats = data.cats.filter((x) => x.id !== c.id);
-      if (data.settings.cat === c.id) data.settings.cat = data.cats[0].id;
-      save();
-      sh.close();
-      onDone?.();
-      toast(`Deleted ${cat.name}`);
-    }
+    if (e.target.closest('[data-del]') && (await deleteCategory(cat, onDone))) sh.close();
   });
 }
 
@@ -2578,7 +2632,9 @@ function openSessionEditor(s, dayK, onDone) {
   const dateVal = `${d0.getFullYear()}-${pad(d0.getMonth() + 1)}-${pad(d0.getDate())}`;
   const timeVal = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
   let catId = s ? s.cat : currentCat().id;
-  const cats = data.cats.some((c) => c.id === catId) ? data.cats : [...data.cats, catById(catId)];
+  const cats = [...data.cats];
+  if (catId !== NONE && !cats.some((c) => c.id === catId)) cats.push(catById(catId)); // a deleted category's session
+  cats.push(catById(NONE));
 
   const sh = sheet({
     title: isNew ? 'Add session' : 'Edit session',
@@ -2655,14 +2711,14 @@ function openSessionEditor(s, dayK, onDone) {
     toast(isNew ? `Added ${fmtDur(newDur)} to ${catById(catId).name}` : 'Session updated');
   });
 }
-return { openEditor, openGoalSheet, openCategories, openCategoryEditor, openSessionEditor };
+return { openEditor, openGoalSheet, openCategories, deleteCategory, openCategoryEditor, openSessionEditor };
 })();
 
 // ---------- stats.js ----------
 __m.stats = (() => {
-const { data, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak } = __m.store;
+const { data, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } = __m.store;
 const { icon } = __m.ui;
-const { openSessionEditor } = __m.sheets;
+const { openSessionEditor, openCategoryEditor, deleteCategory } = __m.sheets;
 const engine = __m.engine;
 const { esc, fmtDur, fmtTime, clamp, MIN, HOUR } = __m.util;
 
@@ -2764,6 +2820,8 @@ function mountStats(root, { visible = () => true } = {}) {
   }
 
   function render() {
+    // Forget a filter whose category has gone.
+    if (st.cat && (st.cat === NONE ? !usesNone() : !data.cats.some((c) => c.id === st.cat))) st.cat = null;
     const now = Date.now();
     const t = dayKey(now);
     const keys = rangeKeys();
@@ -2785,14 +2843,22 @@ function mountStats(root, { visible = () => true } = {}) {
     const byValue = [...order].sort((a, b) => rangeTotals[b] - rangeTotals[a]);
     const nextDisabled = keys[keys.length - 1] >= t;
     const tabs = [['week', 'Week'], ['month', 'Month'], ['year', 'Year']];
+    const chipCats = [...data.cats, ...(usesNone() ? [catById(NONE)] : [])];
 
     root.innerHTML = `<div class="bento">
       ${
-        data.cats.length > 1
+        chipCats.length
           ? `<div class="chips filter" role="radiogroup" aria-label="Category filter">
               <button class="chip" role="radio" data-filter="" aria-checked="${!st.cat}">All</button>
-              ${data.cats.map((c) => `<button class="chip" role="radio" data-filter="${esc(c.id)}" aria-checked="${st.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
+              ${chipCats.map((c) => `<button class="chip" role="radio" data-filter="${esc(c.id)}" aria-checked="${st.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
             </div>`
+          : ''
+      }
+      ${
+        st.cat && st.cat !== NONE
+          ? `<div class="cat-bar"><span class="dot" style="--c:${esc(color(st.cat))}"></span><span class="cb-name">${esc(catById(st.cat).name)}</span>
+              <button class="chip sm" data-cat-edit>${icon('edit')}<span>Edit</span></button>
+              <button class="chip sm danger" data-cat-del>${icon('trash')}<span>Delete</span></button></div>`
           : ''
       }
       <div class="range-bar">
@@ -3001,6 +3067,8 @@ function mountStats(root, { visible = () => true } = {}) {
       if (st.range !== 'year') st.sel = keys.includes(t) ? t : keys[keys.length - 1] > t ? keys[0] : keys[keys.length - 1];
       return render();
     }
+    if (e.target.closest('[data-cat-edit]')) return openCategoryEditor(catById(st.cat), render);
+    if (e.target.closest('[data-cat-del]')) return deleteCategory(catById(st.cat));
     const sess = e.target.closest('[data-sess]');
     if (sess) return openSessionEditor(data.sessions.find((s) => s.id === sess.dataset.sess), st.sel, render);
     if (e.target.closest('[data-add]')) openSessionEditor(null, st.sel, render);
@@ -3027,7 +3095,7 @@ __m.home = (() => {
 // view: today's time, this week, your consistency and recent sessions.
 const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd } = __m.store;
 const engine = __m.engine;
-const { makeFace } = __m.faces;
+const { makeFace, homeFaceType } = __m.faces;
 const { icon } = __m.ui;
 const { openSessionEditor, openGoalSheet } = __m.sheets;
 const { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } = __m.util;
@@ -3081,7 +3149,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
   const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
-  let face = makeFace(clockEl, data.settings.face);
+  let face = makeFace(clockEl, homeFaceType());
   let minuteKey = '';
   let chartW = 0;
 
@@ -3125,7 +3193,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     return `<div class="live-card${run ? ' on' : ''}" role="button" tabindex="0" data-go="${m}" aria-label="Open ${what}">
         <span class="live-ic">${icon(m)}</span>
         <span class="live-main">
-          <span class="live-label"><span class="dot" style="--c:${esc(cat.color)}"></span>${esc(what)} · ${esc(cat.name)}</span>
+          <span class="live-label">${cat.none ? '' : `<span class="dot" style="--c:${esc(cat.color)}"></span>`}${esc(what)}${cat.none ? '' : ` · ${esc(cat.name)}`}</span>
           <span class="live-state">${run ? 'Running' : 'Paused'}</span>
         </span>
         <span class="live-time"></span>
@@ -3339,8 +3407,8 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
   }
 
   function tick(now = Date.now(), animate = true) {
-    if (face.type !== data.settings.face) {
-      face = makeFace(clockEl, data.settings.face);
+    if (face.type !== homeFaceType()) {
+      face = makeFace(clockEl, homeFaceType());
       header(now);
     }
     const ds = digits(now);
@@ -3446,7 +3514,8 @@ __m.looks = (() => {
 // (all templates, clock styles, fonts, colours) on the Customize page.
 const { data, saveSoon, emit, on } = __m.store;
 const { TEMPLATES, THEMES, LOOK_DEFAULTS, templateLook, fontById } = __m.config;
-const { makeFace } = __m.faces;
+const { makeFace, homeFaceType } = __m.faces;
+const { is24 } = __m.home;
 const { sheet, icon, haptic, toast } = __m.ui;
 const engine = __m.engine;
 const { esc, hms, pad } = __m.util;
@@ -3613,9 +3682,13 @@ function openLooks({ onMore } = {}) {
   });
 }
 
-/** A live clock showing the current look, kept sized to its box. Returns a cleanup function. */
-function mountPreview(el) {
+/**
+ * A live clock showing the current look, kept sized to its box. With `home()` true it shows
+ * Home's clock (the time of day) instead of the timers'. Returns a cleanup function.
+ */
+function mountPreview(el, { home = () => false } = {}) {
   let face = null;
+  const type = () => (home() ? homeFaceType() : data.settings.face);
   const size = () => {
     const W = Math.min(el.parentElement.clientWidth, 420);
     const round = face && ['ring', 'analog'].includes(face.type);
@@ -3624,10 +3697,17 @@ function mountPreview(el) {
     face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
   };
   const draw = (animate) => {
-    if (face?.type !== data.settings.face) {
-      face = makeFace(el, data.settings.face);
+    if (face?.type !== type()) {
+      face = makeFace(el, type());
       draw(false);
       size();
+      return;
+    }
+    el.classList.toggle('home-look', home());
+    if (home()) {
+      const d = new Date();
+      const h = is24() ? d.getHours() : d.getHours() % 12 || 12;
+      face.render([pad(h), pad(d.getMinutes())], { animate, running: true, progress: d.getSeconds() / 60, label: is24() ? '' : d.getHours() < 12 ? 'AM' : 'PM', date: d });
       return;
     }
     const ms = engine.displayMs();
@@ -3652,7 +3732,7 @@ __m.customize = (() => {
 const { data, saveSoon, emit, on } = __m.store;
 const { FONTS, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } = __m.config;
 const { sheet, switchEl, segEl, bindControls, haptic } = __m.ui;
-const { makeFace, FACES } = __m.faces;
+const { makeFace, FACES, homeFaceType } = __m.faces;
 const { templatesHtml, drawTemplates, markTemplates, applyTemplate, mountPreview } = __m.looks;
 const { esc, getPath, setPath } = __m.util;
 
@@ -3669,6 +3749,8 @@ const COLOR_ROWS = [
   ['digit', 'Digits'],
   ['accent', 'Accent'],
 ];
+
+let target = 'timers'; // which clock the style tiles change: 'timers' or 'home'
 
 function openCustomize({ onClose } = {}) {
   let tileRO = null;
@@ -3700,10 +3782,22 @@ function openCustomize({ onClose } = {}) {
     `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
       <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
 
+  const activeFace = () => (target === 'home' ? homeFaceType() : data.settings.face);
+
+  function faceTilesHtml() {
+    const s = data.settings;
+    const cur = target === 'home' ? (s.homeFace && s.homeFace !== 'same' ? s.homeFace : 'same') : s.face;
+    const list = target === 'home' ? [['same', 'Same as timers'], ...FACES] : FACES;
+    return list
+      .map(([id, name]) => `<button class="face-tile" data-face="${id}" aria-pressed="${cur === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`)
+      .join('');
+  }
+
   /** Options that only make sense for the chosen clock style. */
   function styleOptionsHtml() {
     const s = data.settings;
-    const name = (FACES.find(([id]) => id === s.face) || FACES[0])[1];
+    const face = activeFace();
+    const name = (FACES.find(([id]) => id === face) || FACES[0])[1];
     const colour = (label) => `<div class="row"><div class="row-label">${label}</div><div class="row-ctl wide">${swatches()}</div></div>`;
     const glow = row('Glow', range('glow', 0, 1, 0.05, 'Glow'));
     const blink = row('Blinking colon', switchEl('blink', s.blink !== false, 'Blinking colon'));
@@ -3724,7 +3818,7 @@ function openCustomize({ onClose } = {}) {
       ring: colour('Ring colour') + ticks,
       analog: colour('Second hand colour') + ticks,
     };
-    return group(`${esc(name)} options`, rows[s.face] || rows.flip);
+    return group(`${esc(name)} options`, rows[face] || rows.flip);
   }
 
   function html() {
@@ -3735,10 +3829,10 @@ function openCustomize({ onClose } = {}) {
       ${group('All templates', templatesHtml(), 'pad')}
       ${group(
         'Clock style',
-        `<div class="face-tiles">${FACES.map(
-          ([id, name]) =>
-            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
-        ).join('')}</div>`,
+        `<div class="seg face-target" role="tablist" aria-label="Which clock">${[['timers', 'Stopwatch & timers'], ['home', 'Home']]
+          .map(([v, l]) => `<button role="tab" data-target="${v}" aria-selected="${target === v}">${l}</button>`)
+          .join('')}</div>
+        <div class="face-tiles">${faceTilesHtml()}</div>`,
         'pad'
       )}
       <div class="style-opts">${styleOptionsHtml()}</div>
@@ -3765,7 +3859,7 @@ function openCustomize({ onClose } = {}) {
     tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
     for (const tile of root.querySelectorAll('.face-tile')) {
       const el = tile.querySelector('.face-mini');
-      el._face = makeFace(el, tile.dataset.face);
+      el._face = makeFace(el, tile.dataset.face === 'same' ? data.settings.face : tile.dataset.face);
       el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
       fitMini(el);
       tileRO.observe(el);
@@ -3775,7 +3869,7 @@ function openCustomize({ onClose } = {}) {
   function render() {
     root.innerHTML = html();
     previewCleanup?.();
-    previewCleanup = mountPreview(root.querySelector('.preview-clock'));
+    previewCleanup = mountPreview(root.querySelector('.preview-clock'), { home: () => target === 'home' });
     tplCleanup?.();
     tplCleanup = drawTemplates(root);
     drawFaceTiles();
@@ -3786,7 +3880,8 @@ function openCustomize({ onClose } = {}) {
     const s = data.settings;
     const c = themeColors(s);
     markTemplates(root);
-    root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.face === s.face)));
+    root.querySelector('.face-tiles').innerHTML = faceTilesHtml();
+    drawFaceTiles();
     root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.font === s.font)));
     root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
     root.querySelectorAll('input[data-color]').forEach((inp) => {
@@ -3837,10 +3932,22 @@ function openCustomize({ onClose } = {}) {
       applyTemplate(tpl.dataset.tpl);
       return sync();
     }
+    const tg = e.target.closest('[data-target]');
+    if (tg) {
+      target = tg.dataset.target;
+      root.querySelectorAll('[data-target]').forEach((b) => b.setAttribute('aria-selected', String(b === tg)));
+      root.querySelector('.face-tiles').innerHTML = faceTilesHtml();
+      drawFaceTiles();
+      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
+      return;
+    }
     const fc = e.target.closest('.face-tile');
     if (fc) {
-      s.face = fc.dataset.face;
-      lookChanged();
+      if (target === 'home') s.homeFace = fc.dataset.face; // Home's own style isn't part of a template
+      else {
+        s.face = fc.dataset.face;
+        lookChanged();
+      }
       root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
       root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
       return changed();
@@ -3875,6 +3982,7 @@ const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDia
 const { looksPanel, mountPreview } = __m.looks;
 const { openCustomize } = __m.customize;
 const { openCategories } = __m.sheets;
+const { FACES } = __m.faces;
 const engine = __m.engine;
 const audio = __m.audio;
 const pwa = __m.pwa;
@@ -3960,7 +4068,11 @@ function openSettings() {
             row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'The clock fills the screen. Tap anywhere for controls.') +
             row('Details under the clock', switchEl('showInfo', !!s.showInfo, 'Details under the clock'), 'Start or end time and today’s total')
         )}
-        ${group('Home clock', row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds')))}
+        ${group('Home clock', row(
+          'Clock style',
+          `<select class="select" data-key="homeFace" aria-label="Home clock style">${[['same', 'Same as timers'], ...FACES].map(([v, l]) => `<option value="${v}"${(s.homeFace || 'same') === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`,
+          'Home can use a different clock from the stopwatch and timers'
+        ) + row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds')))}
       </div>
 
       <div class="set-area" data-area="timers">
@@ -4395,7 +4507,7 @@ function renderClock(now, force) {
   // Ring progress: a countdown empties as time runs out; the stopwatch sweeps once a minute.
   const prog = m === 'stopwatch' ? (engine.elapsed(m, now) % MIN) / MIN : r.dur ? engine.remaining(m, now) / r.dur : 0;
   const cat = catById(engine.current(m)?.cat || currentCat().id);
-  const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.name;
+  const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.none ? '' : cat.name;
   face.render(digits, { animate, running, progress: prog, label, ms: engine.displayMs(m, now) });
   if (countChanged) fitClock();
   const joined = `${m}|${digits.join(':')}`;
@@ -4412,6 +4524,7 @@ function renderClock(now, force) {
   clockView.classList.toggle('is-break', m === 'pomodoro' && r.phase !== 'focus');
 
   $('#btn-cat .dot').style.setProperty('--c', cat.color);
+  $('#btn-cat').classList.toggle('none', !!cat.none);
   setText($('#btn-cat .pill-name'), cat.name);
 
   const catToday = dayData(dayKey(now), now).cats[cat.id] || 0;
@@ -4438,6 +4551,9 @@ function renderClock(now, force) {
   }
 }
 
+/** " of Study" for messages; nothing when the session has no category. */
+const inCat = (s) => (catById(s.cat).none ? '' : ` of ${catById(s.cat).name}`);
+
 function frame(force = false) {
   const now = Date.now();
   const events = engine.tick(now);
@@ -4460,7 +4576,7 @@ function handleFinish(events) {
     bg.hold(30 * 1000); // keep the app awake while the alarm rings
     if (S().vibrate && canVibrate() && !document.hidden) navigator.vibrate([250, 120, 250, 120, 400]);
   }
-  const savedTxt = (ev) => (ev.session && ev.kept ? `${fmtDur(sessionDur(ev.session))} of ${catById(ev.session.cat).name} saved` : '');
+  const savedTxt = (ev) => (ev.session && ev.kept ? `${fmtDur(sessionDur(ev.session))}${inCat(ev.session)} saved` : '');
 
   if (last.mode === 'timer') {
     const logged = savedTxt(last) || (last.session ? `Too short to log (under ${S().minSave}s)` : '');
@@ -4539,7 +4655,7 @@ function onReset() {
   const s = info.session;
   if (!s) return;
   const undo = { action: 'Undo', onAction: () => engine.undoReset(info) };
-  if (info.kept) toast(`Saved ${fmtDur(sessionDur(s))} to ${catById(s.cat).name}`, undo);
+  if (info.kept) toast(`Saved ${fmtDur(sessionDur(s))}${catById(s.cat).none ? '' : ` to ${catById(s.cat).name}`}`, undo);
   else toast(`Too short to save (under ${S().minSave}s)`, undo);
 }
 

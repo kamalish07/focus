@@ -21,6 +21,11 @@ export const FACES = [
   ['analog', 'Analog'],
 ];
 
+/** Home can have a clock style of its own; 'same' follows the stopwatch, timer and Pomodoro. */
+export function homeFaceType(s = data.settings) {
+  return s.homeFace && s.homeFace !== 'same' && FACES.some(([id]) => id === s.homeFace) ? s.homeFace : s.face;
+}
+
 const FLIP_SPEED = { slow: 900, normal: 620, fast: 380 };
 const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
 

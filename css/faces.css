@@ -296,4 +296,23 @@ body:has(.app.landscape) .toast { bottom: auto; }
 .hint.center { text-align: center; }
 .hint svg.i.inline { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; }
 /* On Home the hands already tell the time, so the analog dial drops its digital readout. */
-.home-clock .an-digital { display: none; }
+.home-clock .an-digital, .home-look .an-digital { display: none; }
+
+/* ============ categories are optional ============ */
+.pill.none .dot, .cat-row.none .dot { background: transparent; box-shadow: inset 0 0 0 1.6px var(--muted); }
+.pill.none .pill-name { color: var(--muted); }
+.cat-name small { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.cat-edit-gap { flex: none; width: 44px; }
+.dialog-actions.stack { flex-direction: column; }
+.dialog-actions.stack .btn { flex: none; width: 100%; }
+
+/* Stats: actions for the category you've filtered to */
+.cat-bar { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 0 2px; }
+.cat-bar .cb-name { flex: 1; min-width: 0; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip.sm { height: 32px; padding: 0 12px; gap: 6px; font-size: 13px; }
+.chip.sm svg.i { width: 15px; height: 15px; }
+.chip.danger { color: var(--danger); }
+
+/* Customize: pick the style for the timers or for Home */
+.seg.face-target { display: flex; width: 100%; margin-bottom: 12px; }
+.seg.face-target > button { flex: 1; }

@@ -1,6 +1,6 @@
-import { data, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak } from './store.js';
+import { data, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } from './store.js';
 import { icon } from './ui.js';
-import { openSessionEditor } from './sheets.js';
+import { openSessionEditor, openCategoryEditor, deleteCategory } from './sheets.js';
 import * as engine from './engine.js';
 import { esc, fmtDur, fmtTime, clamp, MIN, HOUR } from './util.js';
 
@@ -102,6 +102,8 @@ export function mountStats(root, { visible = () => true } = {}) {
   }
 
   function render() {
+    // Forget a filter whose category has gone.
+    if (st.cat && (st.cat === NONE ? !usesNone() : !data.cats.some((c) => c.id === st.cat))) st.cat = null;
     const now = Date.now();
     const t = dayKey(now);
     const keys = rangeKeys();
@@ -123,14 +125,22 @@ export function mountStats(root, { visible = () => true } = {}) {
     const byValue = [...order].sort((a, b) => rangeTotals[b] - rangeTotals[a]);
     const nextDisabled = keys[keys.length - 1] >= t;
     const tabs = [['week', 'Week'], ['month', 'Month'], ['year', 'Year']];
+    const chipCats = [...data.cats, ...(usesNone() ? [catById(NONE)] : [])];
 
     root.innerHTML = `<div class="bento">
       ${
-        data.cats.length > 1
+        chipCats.length
           ? `<div class="chips filter" role="radiogroup" aria-label="Category filter">
               <button class="chip" role="radio" data-filter="" aria-checked="${!st.cat}">All</button>
-              ${data.cats.map((c) => `<button class="chip" role="radio" data-filter="${esc(c.id)}" aria-checked="${st.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
+              ${chipCats.map((c) => `<button class="chip" role="radio" data-filter="${esc(c.id)}" aria-checked="${st.cat === c.id}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
             </div>`
+          : ''
+      }
+      ${
+        st.cat && st.cat !== NONE
+          ? `<div class="cat-bar"><span class="dot" style="--c:${esc(color(st.cat))}"></span><span class="cb-name">${esc(catById(st.cat).name)}</span>
+              <button class="chip sm" data-cat-edit>${icon('edit')}<span>Edit</span></button>
+              <button class="chip sm danger" data-cat-del>${icon('trash')}<span>Delete</span></button></div>`
           : ''
       }
       <div class="range-bar">
@@ -339,6 +349,8 @@ export function mountStats(root, { visible = () => true } = {}) {
       if (st.range !== 'year') st.sel = keys.includes(t) ? t : keys[keys.length - 1] > t ? keys[0] : keys[keys.length - 1];
       return render();
     }
+    if (e.target.closest('[data-cat-edit]')) return openCategoryEditor(catById(st.cat), render);
+    if (e.target.closest('[data-cat-del]')) return deleteCategory(catById(st.cat));
     const sess = e.target.closest('[data-sess]');
     if (sess) return openSessionEditor(data.sessions.find((s) => s.id === sess.dataset.sess), st.sel, render);
     if (e.target.closest('[data-add]')) openSessionEditor(null, st.sel, render);

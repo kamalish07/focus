@@ -2,7 +2,7 @@
 // view: today's time, this week, your consistency and recent sessions.
 import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd } from './store.js';
 import * as engine from './engine.js';
-import { makeFace } from './faces.js';
+import { makeFace, homeFaceType } from './faces.js';
 import { icon } from './ui.js';
 import { openSessionEditor, openGoalSheet } from './sheets.js';
 import { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } from './util.js';
@@ -56,7 +56,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
   const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
-  let face = makeFace(clockEl, data.settings.face);
+  let face = makeFace(clockEl, homeFaceType());
   let minuteKey = '';
   let chartW = 0;
 
@@ -100,7 +100,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     return `<div class="live-card${run ? ' on' : ''}" role="button" tabindex="0" data-go="${m}" aria-label="Open ${what}">
         <span class="live-ic">${icon(m)}</span>
         <span class="live-main">
-          <span class="live-label"><span class="dot" style="--c:${esc(cat.color)}"></span>${esc(what)} · ${esc(cat.name)}</span>
+          <span class="live-label">${cat.none ? '' : `<span class="dot" style="--c:${esc(cat.color)}"></span>`}${esc(what)}${cat.none ? '' : ` · ${esc(cat.name)}`}</span>
           <span class="live-state">${run ? 'Running' : 'Paused'}</span>
         </span>
         <span class="live-time"></span>
@@ -314,8 +314,8 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
   }
 
   function tick(now = Date.now(), animate = true) {
-    if (face.type !== data.settings.face) {
-      face = makeFace(clockEl, data.settings.face);
+    if (face.type !== homeFaceType()) {
+      face = makeFace(clockEl, homeFaceType());
       header(now);
     }
     const ds = digits(now);

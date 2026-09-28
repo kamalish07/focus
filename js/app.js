@@ -217,7 +217,7 @@ function renderClock(now, force) {
   // Ring progress: a countdown empties as time runs out; the stopwatch sweeps once a minute.
   const prog = m === 'stopwatch' ? (engine.elapsed(m, now) % MIN) / MIN : r.dur ? engine.remaining(m, now) / r.dur : 0;
   const cat = catById(engine.current(m)?.cat || currentCat().id);
-  const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.name;
+  const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.none ? '' : cat.name;
   face.render(digits, { animate, running, progress: prog, label, ms: engine.displayMs(m, now) });
   if (countChanged) fitClock();
   const joined = `${m}|${digits.join(':')}`;
@@ -234,6 +234,7 @@ function renderClock(now, force) {
   clockView.classList.toggle('is-break', m === 'pomodoro' && r.phase !== 'focus');
 
   $('#btn-cat .dot').style.setProperty('--c', cat.color);
+  $('#btn-cat').classList.toggle('none', !!cat.none);
   setText($('#btn-cat .pill-name'), cat.name);
 
   const catToday = dayData(dayKey(now), now).cats[cat.id] || 0;
@@ -260,6 +261,9 @@ function renderClock(now, force) {
   }
 }
 
+/** " of Study" for messages; nothing when the session has no category. */
+const inCat = (s) => (catById(s.cat).none ? '' : ` of ${catById(s.cat).name}`);
+
 function frame(force = false) {
   const now = Date.now();
   const events = engine.tick(now);
@@ -282,7 +286,7 @@ function handleFinish(events) {
     bg.hold(30 * 1000); // keep the app awake while the alarm rings
     if (S().vibrate && canVibrate() && !document.hidden) navigator.vibrate([250, 120, 250, 120, 400]);
   }
-  const savedTxt = (ev) => (ev.session && ev.kept ? `${fmtDur(sessionDur(ev.session))} of ${catById(ev.session.cat).name} saved` : '');
+  const savedTxt = (ev) => (ev.session && ev.kept ? `${fmtDur(sessionDur(ev.session))}${inCat(ev.session)} saved` : '');
 
   if (last.mode === 'timer') {
     const logged = savedTxt(last) || (last.session ? `Too short to log (under ${S().minSave}s)` : '');
@@ -361,7 +365,7 @@ function onReset() {
   const s = info.session;
   if (!s) return;
   const undo = { action: 'Undo', onAction: () => engine.undoReset(info) };
-  if (info.kept) toast(`Saved ${fmtDur(sessionDur(s))} to ${catById(s.cat).name}`, undo);
+  if (info.kept) toast(`Saved ${fmtDur(sessionDur(s))}${catById(s.cat).none ? '' : ` to ${catById(s.cat).name}`}`, undo);
   else toast(`Too short to save (under ${S().minSave}s)`, undo);
 }
 

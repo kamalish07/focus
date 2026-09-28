@@ -3,10 +3,14 @@ import { MIN, pad } from './util.js';
 
 const KEY = 'focus.v1';
 
+/** Time can be logged without a category; it's grouped under this id. */
+export const NONE = 'none';
+
 export const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
-  face: 'flip', // see FACES in faces.js
+  face: 'flip', // see FACES in faces.js (stopwatch, timer and Pomodoro)
+  homeFace: 'same', // Home's clock: 'same' as the timers, or a face of its own
   template: 'classic', // last template applied; null once you customise
   faceColor: 'auto',
   glow: 0.6,
@@ -37,7 +41,7 @@ export const DEFAULT_SETTINGS = {
   weekStart: 1,
   dayStart: 0, // hour a new "day" begins, for night owls
   minSave: 30, // seconds; shorter sessions are not kept
-  cat: 'study',
+  cat: 'study', // current category, or NONE to log without one
   seenTip: false,
   showInfo: false, // the line under the clock (start time, today's total)
   bgSound: 'silent', // off | silent | brown | pink | white; keeps the app alive with the screen off
@@ -89,7 +93,9 @@ function normalize(d) {
   if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
-  const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id) : [];
+  // Categories are optional: an empty list is fine (everything is then "No category").
+  const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
+  if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
   const sessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
   const ids = new Set(sessions.map((s) => s.id));
 
@@ -114,7 +120,7 @@ function normalize(d) {
       s.run = null;
     }
   }
-  return { v: 5, settings, cats: cats.length ? cats : def.cats, sessions, runners };
+  return { v: 5, settings, cats, sessions, runners };
 }
 
 /** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
@@ -213,17 +219,23 @@ export const resetAll = () => setData(defaults());
 
 /* ---------- categories ---------- */
 
+const NO_CAT = Object.freeze({ id: NONE, name: 'No category', color: '#8e8e93', goal: 0, none: true });
+
 export const catById = (id) =>
-  data.cats.find((c) => c.id === id) || { id, name: 'Deleted', color: '#6b6b6b', goal: 0, missing: true };
+  !id || id === NONE ? NO_CAT : data.cats.find((c) => c.id === id) || { id, name: 'Deleted', color: '#6b6b6b', goal: 0, missing: true };
 
 export function currentCat() {
+  if (data.settings.cat === NONE) return NO_CAT;
   let c = data.cats.find((x) => x.id === data.settings.cat);
   if (!c) {
-    c = data.cats[0];
+    c = data.cats[0] || NO_CAT;
     data.settings.cat = c.id;
   }
   return c;
 }
+
+/** Has any time been logged without a category? */
+export const usesNone = () => data.sessions.some((s) => s.cat === NONE);
 
 /** Daily goal in ms for a category, or the overall daily goal (all categories) when catId is null. 0 = no goal. */
 export function goalFor(catId) {

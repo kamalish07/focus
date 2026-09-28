@@ -166,7 +166,7 @@ function swipeToClose(ov, onClose) {
   }
 }
 
-export function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, primary: true }], dismissValue = null }) {
+export function dialog({ title, message = '', buttons = [{ label: 'OK', value: true, primary: true }], dismissValue = null, stack = false }) {
   return new Promise((resolve) => {
     let result = dismissValue;
     const ov = document.createElement('div');
@@ -174,7 +174,7 @@ export function dialog({ title, message = '', buttons = [{ label: 'OK', value: t
     ov.innerHTML = `<div class="backdrop" data-dismiss></div>
       <section class="panel" role="alertdialog" aria-modal="true" aria-label="${esc(title)}">
         <h3>${esc(title)}</h3>${message ? `<p>${esc(message)}</p>` : ''}
-        <div class="dialog-actions">${buttons
+        <div class="dialog-actions${stack ? ' stack' : ''}">${buttons
           .map((b, i) => `<button class="btn${b.primary ? ' primary' : ''}${b.danger ? ' danger-fill' : ''}" data-i="${i}">${esc(b.label)}</button>`)
           .join('')}</div>
       </section>`;

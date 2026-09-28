@@ -2,7 +2,8 @@
 // (all templates, clock styles, fonts, colours) on the Customize page.
 import { data, saveSoon, emit, on } from './store.js';
 import { TEMPLATES, THEMES, LOOK_DEFAULTS, templateLook, fontById } from './config.js';
-import { makeFace } from './faces.js';
+import { makeFace, homeFaceType } from './faces.js';
+import { is24 } from './home.js';
 import { sheet, icon, haptic, toast } from './ui.js';
 import * as engine from './engine.js';
 import { esc, hms, pad } from './util.js';
@@ -169,9 +170,13 @@ export function openLooks({ onMore } = {}) {
   });
 }
 
-/** A live clock showing the current look, kept sized to its box. Returns a cleanup function. */
-export function mountPreview(el) {
+/**
+ * A live clock showing the current look, kept sized to its box. With `home()` true it shows
+ * Home's clock (the time of day) instead of the timers'. Returns a cleanup function.
+ */
+export function mountPreview(el, { home = () => false } = {}) {
   let face = null;
+  const type = () => (home() ? homeFaceType() : data.settings.face);
   const size = () => {
     const W = Math.min(el.parentElement.clientWidth, 420);
     const round = face && ['ring', 'analog'].includes(face.type);
@@ -180,10 +185,17 @@ export function mountPreview(el) {
     face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
   };
   const draw = (animate) => {
-    if (face?.type !== data.settings.face) {
-      face = makeFace(el, data.settings.face);
+    if (face?.type !== type()) {
+      face = makeFace(el, type());
       draw(false);
       size();
+      return;
+    }
+    el.classList.toggle('home-look', home());
+    if (home()) {
+      const d = new Date();
+      const h = is24() ? d.getHours() : d.getHours() % 12 || 12;
+      face.render([pad(h), pad(d.getMinutes())], { animate, running: true, progress: d.getSeconds() / 60, label: is24() ? '' : d.getHours() < 12 ? 'AM' : 'PM', date: d });
       return;
     }
     const ms = engine.displayMs();

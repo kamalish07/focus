@@ -3,7 +3,7 @@
 import { data, saveSoon, emit, on } from './store.js';
 import { FONTS, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } from './config.js';
 import { sheet, switchEl, segEl, bindControls, haptic } from './ui.js';
-import { makeFace, FACES } from './faces.js';
+import { makeFace, FACES, homeFaceType } from './faces.js';
 import { templatesHtml, drawTemplates, markTemplates, applyTemplate, mountPreview } from './looks.js';
 import { esc, getPath, setPath } from './util.js';
 
@@ -20,6 +20,8 @@ const COLOR_ROWS = [
   ['digit', 'Digits'],
   ['accent', 'Accent'],
 ];
+
+let target = 'timers'; // which clock the style tiles change: 'timers' or 'home'
 
 export function openCustomize({ onClose } = {}) {
   let tileRO = null;
@@ -51,10 +53,22 @@ export function openCustomize({ onClose } = {}) {
     `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
       <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
 
+  const activeFace = () => (target === 'home' ? homeFaceType() : data.settings.face);
+
+  function faceTilesHtml() {
+    const s = data.settings;
+    const cur = target === 'home' ? (s.homeFace && s.homeFace !== 'same' ? s.homeFace : 'same') : s.face;
+    const list = target === 'home' ? [['same', 'Same as timers'], ...FACES] : FACES;
+    return list
+      .map(([id, name]) => `<button class="face-tile" data-face="${id}" aria-pressed="${cur === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`)
+      .join('');
+  }
+
   /** Options that only make sense for the chosen clock style. */
   function styleOptionsHtml() {
     const s = data.settings;
-    const name = (FACES.find(([id]) => id === s.face) || FACES[0])[1];
+    const face = activeFace();
+    const name = (FACES.find(([id]) => id === face) || FACES[0])[1];
     const colour = (label) => `<div class="row"><div class="row-label">${label}</div><div class="row-ctl wide">${swatches()}</div></div>`;
     const glow = row('Glow', range('glow', 0, 1, 0.05, 'Glow'));
     const blink = row('Blinking colon', switchEl('blink', s.blink !== false, 'Blinking colon'));
@@ -75,7 +89,7 @@ export function openCustomize({ onClose } = {}) {
       ring: colour('Ring colour') + ticks,
       analog: colour('Second hand colour') + ticks,
     };
-    return group(`${esc(name)} options`, rows[s.face] || rows.flip);
+    return group(`${esc(name)} options`, rows[face] || rows.flip);
   }
 
   function html() {
@@ -86,10 +100,10 @@ export function openCustomize({ onClose } = {}) {
       ${group('All templates', templatesHtml(), 'pad')}
       ${group(
         'Clock style',
-        `<div class="face-tiles">${FACES.map(
-          ([id, name]) =>
-            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
-        ).join('')}</div>`,
+        `<div class="seg face-target" role="tablist" aria-label="Which clock">${[['timers', 'Stopwatch & timers'], ['home', 'Home']]
+          .map(([v, l]) => `<button role="tab" data-target="${v}" aria-selected="${target === v}">${l}</button>`)
+          .join('')}</div>
+        <div class="face-tiles">${faceTilesHtml()}</div>`,
         'pad'
       )}
       <div class="style-opts">${styleOptionsHtml()}</div>
@@ -116,7 +130,7 @@ export function openCustomize({ onClose } = {}) {
     tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
     for (const tile of root.querySelectorAll('.face-tile')) {
       const el = tile.querySelector('.face-mini');
-      el._face = makeFace(el, tile.dataset.face);
+      el._face = makeFace(el, tile.dataset.face === 'same' ? data.settings.face : tile.dataset.face);
       el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
       fitMini(el);
       tileRO.observe(el);
@@ -126,7 +140,7 @@ export function openCustomize({ onClose } = {}) {
   function render() {
     root.innerHTML = html();
     previewCleanup?.();
-    previewCleanup = mountPreview(root.querySelector('.preview-clock'));
+    previewCleanup = mountPreview(root.querySelector('.preview-clock'), { home: () => target === 'home' });
     tplCleanup?.();
     tplCleanup = drawTemplates(root);
     drawFaceTiles();
@@ -137,7 +151,8 @@ export function openCustomize({ onClose } = {}) {
     const s = data.settings;
     const c = themeColors(s);
     markTemplates(root);
-    root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.face === s.face)));
+    root.querySelector('.face-tiles').innerHTML = faceTilesHtml();
+    drawFaceTiles();
     root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.font === s.font)));
     root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
     root.querySelectorAll('input[data-color]').forEach((inp) => {
@@ -188,10 +203,22 @@ export function openCustomize({ onClose } = {}) {
       applyTemplate(tpl.dataset.tpl);
       return sync();
     }
+    const tg = e.target.closest('[data-target]');
+    if (tg) {
+      target = tg.dataset.target;
+      root.querySelectorAll('[data-target]').forEach((b) => b.setAttribute('aria-selected', String(b === tg)));
+      root.querySelector('.face-tiles').innerHTML = faceTilesHtml();
+      drawFaceTiles();
+      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
+      return;
+    }
     const fc = e.target.closest('.face-tile');
     if (fc) {
-      s.face = fc.dataset.face;
-      lookChanged();
+      if (target === 'home') s.homeFace = fc.dataset.face; // Home's own style isn't part of a template
+      else {
+        s.face = fc.dataset.face;
+        lookChanged();
+      }
       root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
       root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
       return changed();

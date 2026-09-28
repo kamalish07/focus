@@ -129,7 +129,7 @@ function lockScreen(m, now, isRunning) {
     try {
       ms.metadata = new MediaMetadata({
         title,
-        artist: cat.name,
+        artist: cat.none ? 'Focus' : cat.name,
         album: 'Focus',
         artwork: [
           { src: abs('icons/icon-192.png'), sizes: '192x192', type: 'image/png' },

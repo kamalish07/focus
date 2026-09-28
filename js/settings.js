@@ -4,6 +4,7 @@ import { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDi
 import { looksPanel, mountPreview } from './looks.js';
 import { openCustomize } from './customize.js';
 import { openCategories } from './sheets.js';
+import { FACES } from './faces.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as pwa from './pwa.js';
@@ -89,7 +90,11 @@ export function openSettings() {
             row('Full-screen clock while running', switchEl('autoHide', s.autoHide, 'Full-screen clock while running'), 'The clock fills the screen. Tap anywhere for controls.') +
             row('Details under the clock', switchEl('showInfo', !!s.showInfo, 'Details under the clock'), 'Start or end time and today’s total')
         )}
-        ${group('Home clock', row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds')))}
+        ${group('Home clock', row(
+          'Clock style',
+          `<select class="select" data-key="homeFace" aria-label="Home clock style">${[['same', 'Same as timers'], ...FACES].map(([v, l]) => `<option value="${v}"${(s.homeFace || 'same') === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`,
+          'Home can use a different clock from the stopwatch and timers'
+        ) + row('24-hour time', switchEl('clock24', is24(), '24-hour time')) + row('Show seconds', switchEl('clockSeconds', s.clockSeconds, 'Show seconds')))}
       </div>
 
       <div class="set-area" data-area="timers">

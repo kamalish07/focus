@@ -1,7 +1,7 @@
-import { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, nextColor } from './store.js';
+import { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, nextColor, NONE } from './store.js';
 import { PALETTE, TIMER_PRESETS } from './config.js';
 import * as engine from './engine.js';
-import { sheet, icon, toast, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } from './ui.js';
+import { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } from './ui.js';
 import { esc, fmtDur, pad, uid, getPath, setPath, MIN, HOUR, SEC } from './util.js';
 
 const minus = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
@@ -172,9 +172,10 @@ export function openGoalSheet(onDone) {
 
 /* ---------- categories ---------- */
 
+/** "No category" first, then your categories. */
 export function openCategories() {
   const sh = sheet({
-    title: 'Categories',
+    title: 'Category',
     body: `<div class="cat-list"></div><button class="btn block ghost" data-new>${icon('plus')}<span>New category</span></button>
       <p class="hint small center">Tap ${icon('edit', 'inline')} to rename, recolour or delete a category.</p>`,
   });
@@ -182,16 +183,16 @@ export function openCategories() {
   const draw = () => {
     const day = dayData(dayKey(Date.now()));
     const sel = currentCat().id;
-    list.innerHTML = data.cats
+    list.innerHTML = [catById(NONE), ...data.cats]
       .map(
-        (c) => `<div class="cat-row${c.id === sel ? ' sel' : ''}">
+        (c) => `<div class="cat-row${c.id === sel ? ' sel' : ''}${c.none ? ' none' : ''}">
           <button class="cat-pick" data-pick="${esc(c.id)}">
             <span class="dot" style="--c:${esc(c.color)}"></span>
-            <span class="cat-name">${esc(c.name)}</span>
+            <span class="cat-name">${esc(c.name)}${c.none ? '<small>Just time it</small>' : ''}</span>
             <span class="cat-meta">${fmtDur(day.cats[c.id] || 0)}${c.goal ? ` / ${fmtDur(c.goal * MIN)}` : ''}</span>
             ${c.id === sel ? icon('check', 'cat-check') : ''}
           </button>
-          <button class="icon-btn" data-edit="${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}</button>
+          ${c.none ? '<span class="cat-edit-gap"></span>' : `<button class="icon-btn" data-edit="${esc(c.id)}" aria-label="Edit ${esc(c.name)}">${icon('edit')}</button>`}
         </div>`
       )
       .join('');
@@ -204,7 +205,7 @@ export function openCategories() {
       const moved = engine.setCategory(id);
       haptic();
       sh.close();
-      if (moved) toast(`Current session moved to ${catById(id).name}`);
+      if (moved) toast(id === NONE ? 'Current session is now uncategorised' : `Current session moved to ${catById(id).name}`);
       return;
     }
     const ed = e.target.closest('[data-edit]');
@@ -213,10 +214,64 @@ export function openCategories() {
   });
 }
 
+/**
+ * Deletes a category after asking. Its logged time can stay (as No category) or go with it.
+ * A clock running in it keeps running, uncategorised. Undo puts everything back.
+ * Resolves true once deleted.
+ */
+export async function deleteCategory(cat, onDone) {
+  const open = new Set(engine.MODES.map((m) => engine.current(m)?.id).filter(Boolean));
+  const mine = data.sessions.filter((s) => s.cat === cat.id);
+  const closed = mine.filter((s) => !open.has(s.id));
+  let keep = true;
+  if (closed.length) {
+    const total = closed.reduce((a, s) => a + sessionDur(s), 0);
+    const choice = await dialog({
+      title: `Delete “${cat.name}”?`,
+      message: `It has ${closed.length} logged session${closed.length === 1 ? '' : 's'} (${fmtDur(total)}). Keep that time under No category, or delete it too?`,
+      buttons: [
+        { label: 'Keep the time', value: 'keep', primary: true },
+        { label: 'Delete the time too', value: 'all', danger: true },
+        { label: 'Cancel', value: null },
+      ],
+      stack: true,
+    });
+    if (!choice) return false;
+    keep = choice === 'keep';
+  } else if (!(await confirmDialog({ title: `Delete “${cat.name}”?`, message: 'It has no logged time.', ok: 'Delete', danger: true }))) {
+    return false;
+  }
+  const at = data.cats.findIndex((x) => x.id === cat.id);
+  if (at < 0) return false;
+  const [removed] = data.cats.splice(at, 1);
+  const dropped = keep ? [] : closed;
+  const relabelled = keep ? mine : mine.filter((s) => open.has(s.id));
+  if (dropped.length) {
+    const gone = new Set(dropped.map((s) => s.id));
+    data.sessions = data.sessions.filter((s) => !gone.has(s.id));
+  }
+  for (const s of relabelled) s.cat = NONE;
+  const wasCurrent = data.settings.cat === cat.id;
+  if (wasCurrent) data.settings.cat = NONE;
+  save();
+  onDone?.();
+  toast(`Deleted ${cat.name}`, {
+    action: 'Undo',
+    onAction: () => {
+      data.cats.splice(Math.min(at, data.cats.length), 0, removed);
+      data.sessions.push(...dropped);
+      for (const s of relabelled) if (s.cat === NONE) s.cat = cat.id;
+      if (wasCurrent && data.settings.cat === NONE) data.settings.cat = cat.id;
+      save();
+      onDone?.();
+    },
+  });
+  return true;
+}
+
 export function openCategoryEditor(cat, onDone) {
   const isNew = !cat;
   const c = cat ? { ...cat } : { id: uid(), name: '', color: nextColor(), goal: 0 }; // goals are optional
-  const canDelete = !isNew && data.cats.length > 1;
   const sh = sheet({
     title: isNew ? 'New category' : 'Edit category',
     body: `<label class="field"><span class="field-label">Name</span>
@@ -229,8 +284,7 @@ export function openCategoryEditor(cat, onDone) {
         <div class="row"><div class="row-label">Daily goal<small>Optional, just for this category</small></div>
           <div class="row-ctl">${stepperEl('goal', c.goal, { min: 0, max: 960, step: 15, fmt: 'goal' }, 'category goal')}</div></div>
       </div>
-      ${!isNew && !canDelete ? '<p class="hint small">This is your only category, so it can’t be deleted. You can rename it instead.</p>' : ''}
-      ${actions('Save', canDelete ? `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>` : '')}`,
+      ${actions('Save', isNew ? '' : `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>`)}`,
   });
   bindControls(sh.body, { get: () => c.goal, set: (k, v) => (c.goal = v) });
   const custom = sh.body.querySelector('.swatch.custom');
@@ -257,24 +311,7 @@ export function openCategoryEditor(cat, onDone) {
       onDone?.();
       return;
     }
-    if (e.target.closest('[data-del]')) {
-      const n = data.sessions.filter((s) => s.cat === c.id).length;
-      const ok = await confirmDialog({
-        title: `Delete “${cat.name}”?`,
-        message: n ? `Its ${n} logged session${n === 1 ? '' : 's'} will be deleted too.` : 'This category has no logged time.',
-        ok: 'Delete',
-        danger: true,
-      });
-      if (!ok) return;
-      for (const m of engine.MODES) if (engine.current(m)?.cat === c.id) engine.discardCurrent(m);
-      data.sessions = data.sessions.filter((s) => s.cat !== c.id);
-      data.cats = data.cats.filter((x) => x.id !== c.id);
-      if (data.settings.cat === c.id) data.settings.cat = data.cats[0].id;
-      save();
-      sh.close();
-      onDone?.();
-      toast(`Deleted ${cat.name}`);
-    }
+    if (e.target.closest('[data-del]') && (await deleteCategory(cat, onDone))) sh.close();
   });
 }
 
@@ -306,7 +343,9 @@ export function openSessionEditor(s, dayK, onDone) {
   const dateVal = `${d0.getFullYear()}-${pad(d0.getMonth() + 1)}-${pad(d0.getDate())}`;
   const timeVal = `${pad(d0.getHours())}:${pad(d0.getMinutes())}`;
   let catId = s ? s.cat : currentCat().id;
-  const cats = data.cats.some((c) => c.id === catId) ? data.cats : [...data.cats, catById(catId)];
+  const cats = [...data.cats];
+  if (catId !== NONE && !cats.some((c) => c.id === catId)) cats.push(catById(catId)); // a deleted category's session
+  cats.push(catById(NONE));
 
   const sh = sheet({
     title: isNew ? 'Add session' : 'Edit session',
