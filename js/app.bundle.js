@@ -3127,6 +3127,7 @@ function hourLabel(h) {
 function openSettings() {
   let offFit = null;
   let iv = 0;
+  let tileRO = null;
   const pg = sheet({
     title: 'Settings',
     kind: 'page',
@@ -3134,6 +3135,7 @@ function openSettings() {
     onClose: () => {
       offFit?.();
       clearInterval(iv);
+      tileRO?.disconnect();
     },
   });
   const root = pg.body.querySelector('.settings');
@@ -3303,13 +3305,17 @@ function openSettings() {
     document.fonts?.ready.then(() => root.isConnected && drawFaceTiles());
   }
 
-  /** Each style tile shows a real, tiny version of that clock face. */
+  /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
   function drawFaceTiles() {
+    tileRO?.disconnect();
+    const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
+    tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
     for (const tile of root.querySelectorAll('.face-tile')) {
       const el = tile.querySelector('.face-mini');
-      const f = makeFace(el, tile.dataset.face);
-      f.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '' });
-      f.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
+      el._face = makeFace(el, tile.dataset.face);
+      el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '' });
+      fitMini(el);
+      tileRO.observe(el);
     }
   }
 
