@@ -211,6 +211,7 @@ export function openSettings() {
       drawFaceTiles(); // re-measure once web fonts have loaded
     });
     drawFaceTiles();
+    document.fonts?.ready.then(() => root.isConnected && drawFaceTiles());
   }
 
   /** Each style tile shows a real, tiny version of that clock face. */
