@@ -127,7 +127,62 @@
 /* The tile clips; the mini clock itself doesn't, so glows fade out naturally instead of hitting a hard edge. */
 .tpl-mini { flex: none; width: 100%; height: 80px; pointer-events: none; overflow: visible; contain: size; cursor: inherit; }
 .tpl-name { font-size: 13px; font-weight: 650; color: var(--digit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.looks-sheet .btn.block { margin-top: 14px; }
+
+/* The simple looks panel: four templates, a way into everything else, then the theme */
+.tpls.featured { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.tpls.featured .tpl-mini { height: 92px; }
+@container (min-width: 620px) { .area-looks .tpls.featured { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.more-looks {
+  display: flex; align-items: center; gap: 14px;
+  width: 100%; margin-top: 10px;
+  padding: 12px 12px 12px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  text-align: left;
+  transition: transform .15s ease, background .2s;
+}
+.more-looks:active { transform: scale(.98); }
+.ml-fan { position: relative; flex: none; width: 70px; height: 48px; }
+.ml-fan i {
+  position: absolute; top: 5px; left: 50%;
+  width: 30px; height: 38px; margin-left: -15px;
+  display: grid; place-items: center;
+  border-radius: 8px;
+  background: var(--b); color: var(--d);
+  font: 700 19px/1 var(--f); font-style: normal;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .4), inset 0 0 0 1px color-mix(in srgb, var(--d) 35%, transparent);
+  transition: transform .3s cubic-bezier(.2, .8, .2, 1);
+}
+.ml-fan i:nth-child(1) { transform: translateX(-19px) rotate(-14deg); }
+.ml-fan i:nth-child(2) { transform: translateY(-3px); z-index: 1; }
+.ml-fan i:nth-child(3) { transform: translateX(19px) rotate(14deg); }
+.more-looks:is(:hover, :active) .ml-fan i:nth-child(1) { transform: translateX(-23px) rotate(-19deg); }
+.more-looks:is(:hover, :active) .ml-fan i:nth-child(3) { transform: translateX(23px) rotate(19deg); }
+.ml-badge {
+  position: absolute; right: -2px; bottom: -3px; z-index: 2;
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: var(--on-accent);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+}
+.ml-badge svg.i { width: 13px; height: 13px; stroke-width: 2.6; }
+.ml-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ml-title { font-size: 15px; font-weight: 700; }
+.ml-sub { color: var(--muted); font-size: 12.5px; line-height: 1.3; }
+.ml-chev { color: var(--muted); }
+.looks-label { margin: 20px 2px 10px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+.themes.strip {
+  display: flex; gap: 10px;
+  overflow-x: auto; scrollbar-width: none;
+  margin-inline: calc(-1 * var(--bleed, 0px));
+  padding: 2px var(--bleed, 0px) 4px;
+  scroll-padding-inline: var(--bleed, 0px);
+  scroll-snap-type: x proximity;
+}
+.themes.strip::-webkit-scrollbar { display: none; }
+.themes.strip .theme-tile { flex: 0 0 84px; scroll-snap-align: start; }
+.group.pad .themes.strip { --bleed: 14px; }
+.looks-sheet .themes.strip { --bleed: 18px; }
 
 /* ============ settings: sections and "customize further" ============ */
 .set-nav {
@@ -148,11 +203,6 @@
 .set-nav button:active { transform: scale(.95); }
 .set-nav button[aria-current='true'] { background: var(--accent); color: var(--on-accent); }
 .set-area { scroll-margin-top: 60px; }
-.customize-toggle { margin-top: 14px; justify-content: flex-start; }
-.customize-toggle span { flex: 1; text-align: left; }
-.customize-toggle .chev { transition: transform .25s ease; }
-.customize-toggle[aria-expanded='true'] .chev { transform: rotate(180deg); }
-.customize:not([hidden]) { animation: fadeUp .32s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 .row-ctl.wide { flex: 1 1 100%; margin-left: 0; }
 .swatches.sm { gap: 8px; }
@@ -162,9 +212,10 @@
 @container (min-width: 760px) {
   .settings { column-count: auto; display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-items: start; }
   .settings > .preview, .settings > .set-nav, .settings > .area-looks { grid-column: 1 / -1; }
-  .settings .customize { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-items: start; }
-  .settings .customize > :first-child { grid-column: 1 / -1; }
+  .customize { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; align-items: start; }
+  .customize > :is(.preview, section:nth-of-type(-n + 2)) { grid-column: 1 / -1; }
 }
+.page .panel-body > .customize { max-width: 1100px; }
 
 /* ============ smoother feel ============ */
 .icon-btn, .tab-ic, .live-card, .face-tile, .theme-tile, .font-tile, .chip, .swatch, .sess, .pill { transition: transform .14s ease, background .2s, color .2s, border-color .2s; }
@@ -177,15 +228,33 @@
 .tabbar { view-transition-name: tabbar; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
 
-/* Home dashboard cards float in the first time Home opens */
-.home-bento.intro > * { animation: fadeUp .5s cubic-bezier(.2, .8, .2, 1) both; }
-.home-bento.intro > :nth-child(2) { animation-delay: .04s; }
-.home-bento.intro > :nth-child(3) { animation-delay: .08s; }
-.home-bento.intro > :nth-child(4) { animation-delay: .12s; }
-.home-bento.intro > :nth-child(5) { animation-delay: .16s; }
-.home-bento.intro > :nth-child(6) { animation-delay: .2s; }
-.home-bento.intro > :nth-child(7) { animation-delay: .24s; }
-.home-bento.intro > :nth-child(n + 8) { animation-delay: .28s; }
+/* ============ home: the clock fills the screen; the day's details rise in below ============ */
+.view-home { scroll-snap-type: y proximity; }
+.home-hero, .home-bento { scroll-snap-align: start; scroll-margin-top: calc(env(safe-area-inset-top) + 14px); }
+.hero-stage { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.home-clock-sub:empty { display: none; }
+.home-hero .live-slot { flex: none; width: min(100%, 460px); margin: 0 auto; }
+.hero-cue {
+  flex: none; align-self: center;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 6px 20px 2px;
+  color: var(--muted); font-size: 13.5px; font-weight: 600;
+}
+.hero-cue svg.i { width: 22px; height: 22px; animation: cueBob 2.6s ease-in-out infinite; }
+@keyframes cueBob { 0%, 100% { transform: none; opacity: .45; } 50% { transform: translateY(4px); opacity: 1; } }
+.home-bento { margin-top: 22px; }
+@media (prefers-reduced-motion: no-preference) {
+  @supports (animation-timeline: view()) {
+    .home-hero { view-timeline: --hero block; }
+    .hero-stage { transform-origin: 50% 100%; animation: heroAway linear both; animation-timeline: --hero; animation-range: exit 0% exit 85%; }
+    .hero-head { animation: fadeAway linear both; animation-timeline: --hero; animation-range: exit 0% exit 45%; }
+    .hero-cue, .home-hero .live-slot { animation: fadeAway linear both; animation-timeline: --hero; animation-range: exit 0% exit 30%; }
+    .home-bento > * { animation: riseIn linear both; animation-timeline: view(); animation-range: entry 0% entry 80%; }
+  }
+}
+@keyframes heroAway { to { opacity: 0; transform: translateY(22%) scale(.92); } }
+@keyframes fadeAway { to { opacity: 0; } }
+@keyframes riseIn { from { opacity: 0; transform: translateY(44px) scale(.97); } }
 
 .hero-head .topbar-right { display: flex; gap: 2px; }
 

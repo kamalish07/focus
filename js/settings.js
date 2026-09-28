@@ -1,13 +1,13 @@
 import { data, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } from './store.js';
-import { THEMES, FONTS, SOUNDS, APP_VERSION, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } from './config.js';
-import { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog, haptic } from './ui.js';
-import { makeFace, FACES } from './faces.js';
-import { templatesHtml, drawTemplates, markTemplates, applyTemplate } from './looks.js';
+import { SOUNDS, APP_VERSION } from './config.js';
+import { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } from './ui.js';
+import { looksPanel, mountPreview } from './looks.js';
+import { openCustomize } from './customize.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as pwa from './pwa.js';
 import { is24 } from './home.js';
-import { esc, getPath, setPath, hms, pad, downloadFile } from './util.js';
+import { esc, getPath, setPath, downloadFile } from './util.js';
 
 const BG_SOUNDS = [
   ['silent', 'Silent (recommended)'],
@@ -32,114 +32,27 @@ const row = (label, ctl, hint = '') =>
 const range = (key, min, max, step, label) =>
   `<input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${getPath(data.settings, key)}" aria-label="${esc(label)}">`;
 
-const COLOR_ROWS = [
-  ['bg', 'Background'],
-  ['card', 'Cards'],
-  ['digit', 'Digits'],
-  ['accent', 'Accent'],
-];
-
 function hourLabel(h) {
   if (h === 0) return 'Midnight';
   return new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' });
 }
 
-let customizeOpen = false; // remembered while the app is open
-
-export function openSettings({ customize = false } = {}) {
-  let offFit = null;
-  let iv = 0;
-  let tileRO = null;
-  let tplCleanup = null;
+export function openSettings() {
+  let previewCleanup = null;
+  let looks = null;
   let areaIO = null;
-  if (customize) customizeOpen = true;
   const pg = sheet({
     title: 'Settings',
     kind: 'page',
     body: '<div class="settings"></div>',
     onClose: () => {
-      offFit?.();
-      clearInterval(iv);
-      tileRO?.disconnect();
-      tplCleanup?.();
+      previewCleanup?.();
+      looks?.destroy();
       areaIO?.disconnect();
     },
   });
   const scroller = pg.body;
   const root = pg.body.querySelector('.settings');
-
-  /* ---------- building blocks ---------- */
-
-  const themeTile = (id, t, name) =>
-    `<button class="theme-tile" data-theme="${id}" aria-pressed="${data.settings.theme === id}" style="--tb:${esc(t.bg)};--tc:${esc(t.card)};--td:${esc(t.digit)};--ta:${esc(t.accent)}">
-      <span class="tt-card">25</span><span class="tt-name">${esc(name)}</span></button>`;
-
-  const fontTile = (f) =>
-    `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
-      <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
-
-  const swatches = () =>
-    `<div class="swatches sm">${FACE_COLORS.map(
-      ([v, n]) =>
-        `<button class="swatch${v === 'auto' ? ' auto' : ''}" data-fcolor="${v}" style="--c:${v === 'auto' ? 'transparent' : v}" title="${n}" aria-label="${n}" aria-pressed="${data.settings.faceColor === v}"></button>`
-    ).join('')}</div>`;
-
-  /** Options that only make sense for the chosen clock style. */
-  function styleOptionsHtml() {
-    const s = data.settings;
-    const name = (FACES.find(([id]) => id === s.face) || FACES[0])[1];
-    const colour = (label) => `<div class="row"><div class="row-label">${label}</div><div class="row-ctl wide">${swatches()}</div></div>`;
-    const glow = row('Glow', range('glow', 0, 1, 0.05, 'Glow'));
-    const blink = row('Blinking colon', switchEl('blink', s.blink !== false, 'Blinking colon'));
-    const ghost = (label) => row(label, switchEl('ghost', s.ghost !== false, label));
-    const ticks = row('Tick marks', switchEl('ticks', s.ticks !== false, 'Tick marks'));
-    const rows = {
-      flip:
-        row('Flip speed', segEl('flipSpeed', s.flipSpeed || 'normal', [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']], 'Flip speed')) +
-        row('Flip animation', switchEl('flip', s.flip !== false, 'Flip animation')) +
-        row('Card depth', switchEl('shade', !!s.shade, 'Card depth'), 'Soft light on the top half, shadow on the bottom') +
-        row('Hinge line', switchEl('hinge', s.hinge !== false, 'Hinge line')),
-      minimal: blink,
-      neon: colour('Tube colour') + glow + blink,
-      aurora: row('Palette', segEl('aurora', s.aurora || 'ocean', AURORAS, 'Aurora palette')) + blink,
-      led: colour('Segment colour') + glow + ghost('Show unlit segments') + blink,
-      dots: colour('Dot colour') + glow + ghost('Show unlit dots') + blink,
-      nixie: colour('Tube colour') + glow + ghost('Show unlit digits') + blink,
-      ring: colour('Ring colour') + ticks,
-      analog: colour('Second hand colour') + ticks,
-    };
-    return group(`${esc(name)} options`, rows[s.face] || rows.flip);
-  }
-
-  function customizeHtml() {
-    const s = data.settings;
-    const c = themeColors(s);
-    return `
-      ${group(
-        'Clock style',
-        `<div class="face-tiles">${FACES.map(
-          ([id, name]) =>
-            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
-        ).join('')}</div>`,
-        'pad'
-      )}
-      <div class="style-opts">${styleOptionsHtml()}</div>
-      ${group('Theme', `<div class="themes">${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}${themeTile('custom', s.custom, 'Custom')}</div>`, 'pad')}
-      ${group(
-        'Colours',
-        COLOR_ROWS.map(([k, label]) =>
-          row(label, `<label class="color-in" style="--c:${esc(c[k])}"><input type="color" data-color="${k}" value="${esc(c[k])}" aria-label="${label} colour"></label>`)
-        ).join('')
-      )}
-      ${group('Digit font', `<div class="fonts">${FONTS.map(fontTile).join('')}</div>`, 'pad')}
-      ${group(
-        'Details',
-        row('Digit size', range('digitScale', 0.8, 1.2, 0.01, 'Digit size')) +
-          row('Corner roundness', range('radius', 0, 0.25, 0.005, 'Corner roundness'), 'Flip cards') +
-          row('Background', segEl('backdrop', s.backdrop || 'none', [['none', 'None'], ['glow', 'Glow'], ['gradient', 'Gradient']], 'Background'), 'Soft light behind the clock') +
-          row('Tick sound', switchEl('tick', s.tick, 'Tick sound'), 'A soft click every second while running')
-      )}`;
-  }
 
   function notifCtl() {
     if (!('Notification' in window)) return '<span class="muted">Not supported</span>';
@@ -163,9 +76,7 @@ export function openSettings({ customize = false } = {}) {
       <nav class="set-nav" aria-label="Settings sections">${AREAS.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join('')}</nav>
 
       <div class="set-area area-looks" data-area="looks">
-        ${group('Templates', templatesHtml(), 'pad')}
-        <button class="btn block customize-toggle" aria-expanded="${customizeOpen}">${icon('palette')}<span>Customize further</span>${icon('chevronDown', 'chev')}</button>
-        <div class="customize"${customizeOpen ? '' : ' hidden'}>${customizeOpen ? customizeHtml() : ''}</div>
+        <section class="set-sec"><h3 class="group-title">Looks</h3><div class="group pad looks-panel"></div></section>
       </div>
 
       <div class="set-area" data-area="clock">
@@ -219,7 +130,7 @@ export function openSettings({ customize = false } = {}) {
       <div class="set-area" data-area="data">
         ${group(
           'Tracking',
-          row('Daily goal (all)', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Auto adds up your category goals') +
+          row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
             row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
             row(
               'New day starts at',
@@ -245,70 +156,12 @@ export function openSettings({ customize = false } = {}) {
       </div>`;
   }
 
-  /* ---------- live previews ---------- */
-
-  function mountPreview() {
-    const el = root.querySelector('.preview-clock');
-    let face = null;
-    const size = () => {
-      const W = Math.min(el.parentElement.clientWidth, 420);
-      const round = face && ['ring', 'analog'].includes(face.type);
-      el.style.width = `${W}px`;
-      el.style.height = `${Math.round(W * (round ? 0.62 : 0.44))}px`;
-      face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
-    };
-    const draw = (animate) => {
-      if (face?.type !== data.settings.face) {
-        face = makeFace(el, data.settings.face);
-        draw(false);
-        size();
-        return;
-      }
-      const ms = engine.displayMs();
-      const [, m, sec] = hms(ms, engine.isCountdown());
-      face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview', ms });
-    };
-    draw(false);
-    clearInterval(iv);
-    iv = setInterval(() => draw(true), 200);
-    offFit?.();
-    offFit = on('fit', () => {
-      size();
-      drawFaceTiles();
-    });
-  }
-
-  /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
-  function drawFaceTiles() {
-    tileRO?.disconnect();
-    const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
-    tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
-    for (const tile of root.querySelectorAll('.face-tile')) {
-      const el = tile.querySelector('.face-mini');
-      el._face = makeFace(el, tile.dataset.face);
-      el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
-      fitMini(el);
-      tileRO.observe(el);
-    }
-  }
-
-  function renderCustomize() {
-    const box = root.querySelector('.customize');
-    if (!customizeOpen) {
-      box.hidden = true;
-      return;
-    }
-    box.innerHTML = customizeHtml();
-    box.hidden = false;
-    drawFaceTiles();
-  }
-
   function render() {
     root.innerHTML = html();
-    mountPreview();
-    tplCleanup?.();
-    tplCleanup = drawTemplates(root.querySelector('.area-looks'));
-    if (customizeOpen) drawFaceTiles();
+    previewCleanup?.();
+    previewCleanup = mountPreview(root.querySelector('.preview-clock'));
+    looks?.destroy();
+    looks = looksPanel(root.querySelector('.looks-panel'), { onMore: () => openCustomize({ onClose: () => looks?.render() }) });
     watchAreas();
   }
 
@@ -328,24 +181,6 @@ export function openSettings({ customize = false } = {}) {
     root.querySelectorAll('.set-area').forEach((a) => areaIO.observe(a));
   }
 
-  function refreshThemeUI() {
-    const s = data.settings;
-    const c = themeColors(s);
-    root.querySelectorAll('.theme-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === s.theme)));
-    const custom = root.querySelector('.theme-tile[data-theme="custom"]');
-    if (custom) for (const [k, v] of Object.entries({ tb: s.custom.bg, tc: s.custom.card, td: s.custom.digit, ta: s.custom.accent })) custom.style.setProperty(`--${k}`, v);
-    root.querySelectorAll('input[data-color]').forEach((inp) => {
-      inp.value = c[inp.dataset.color];
-      inp.parentElement.style.setProperty('--c', c[inp.dataset.color]);
-    });
-  }
-
-  /** Any hand-made change to the look means it's no longer an untouched template. */
-  const lookChanged = () => {
-    data.settings.template = null;
-    markTemplates(root);
-  };
-
   const changed = () => {
     saveSoon();
     emit('settings');
@@ -355,7 +190,6 @@ export function openSettings({ customize = false } = {}) {
     get: (k) => getPath(data.settings, k),
     set: (k, v) => {
       setPath(data.settings, k, v);
-      if (LOOK_KEYS.has(k)) lookChanged();
       if (k.startsWith('pomo.')) engine.syncIdle();
       if (k === 'sound') audio.playSound(v);
       changed();
@@ -365,14 +199,6 @@ export function openSettings({ customize = false } = {}) {
   let volTimer = 0;
   root.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.matches('input[data-color]')) {
-      const s = data.settings;
-      s.custom = { ...themeColors(s), [t.dataset.color]: t.value };
-      s.theme = 'custom';
-      lookChanged();
-      refreshThemeUI();
-      changed();
-    }
     if (t.matches('[data-key="volume"]')) {
       clearTimeout(volTimer);
       volTimer = setTimeout(() => audio.playSound(data.settings.sound === 'none' ? 'chime' : data.settings.sound), 250);
@@ -386,51 +212,6 @@ export function openSettings({ customize = false } = {}) {
       const area = root.querySelector(`[data-area="${jump.dataset.jump}"]`);
       area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
-    }
-    const tpl = e.target.closest('[data-tpl]');
-    if (tpl) {
-      haptic(8);
-      applyTemplate(tpl.dataset.tpl);
-      markTemplates(root);
-      if (customizeOpen) renderCustomize();
-      return;
-    }
-    const tog = e.target.closest('.customize-toggle');
-    if (tog) {
-      customizeOpen = !customizeOpen;
-      tog.setAttribute('aria-expanded', String(customizeOpen));
-      renderCustomize();
-      if (customizeOpen) setTimeout(() => tog.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
-      return;
-    }
-    const th = e.target.closest('[data-theme]');
-    if (th) {
-      s.theme = th.dataset.theme;
-      lookChanged();
-      refreshThemeUI();
-      return changed();
-    }
-    const fc = e.target.closest('.face-tile');
-    if (fc) {
-      s.face = fc.dataset.face;
-      lookChanged();
-      root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
-      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
-      return changed();
-    }
-    const col = e.target.closest('[data-fcolor]');
-    if (col) {
-      s.faceColor = col.dataset.fcolor;
-      lookChanged();
-      col.parentElement.querySelectorAll('[data-fcolor]').forEach((b) => b.setAttribute('aria-pressed', String(b === col)));
-      return changed();
-    }
-    const ft = e.target.closest('[data-font]');
-    if (ft) {
-      s.font = ft.dataset.font;
-      lookChanged();
-      root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === ft)));
-      return changed();
     }
     if (e.target.closest('[data-test-sound]')) {
       audio.unlock();
@@ -515,5 +296,4 @@ export function openSettings({ customize = false } = {}) {
   }
 
   render();
-  if (customize) setTimeout(() => root.querySelector('.customize-toggle')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 380);
 }

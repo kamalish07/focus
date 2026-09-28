@@ -362,7 +362,7 @@ export const segEl = (key, value, options, label = '') =>
     .join('')}</div>`;
 
 export function fmtStep(v, fmt, unit) {
-  if (fmt === 'goal') return v ? fmtDur(v * MIN) : 'Auto';
+  if (fmt === 'goal') return v ? fmtDur(v * MIN) : 'Off';
   return `${v}${unit ? ` ${unit}` : ''}`;
 }
 

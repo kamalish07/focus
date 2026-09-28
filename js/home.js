@@ -1,17 +1,16 @@
-// Home: the current time as a big flip clock filling about 70% of the screen, and below
-// it a card grid with the clock you're running, today's time, this week and your consistency.
-import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, currentCat, recentSessions, sessionsOnDay, sessionDur, sessionEnd } from './store.js';
+// Home: the current time fills the screen. Scroll down and the day's details rise into
+// view: today's time, this week, your consistency and recent sessions.
+import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd } from './store.js';
 import * as engine from './engine.js';
 import { makeFace } from './faces.js';
 import { icon } from './ui.js';
-import { openSessionEditor, openCategoryEditor } from './sheets.js';
+import { openSessionEditor, openGoalSheet } from './sheets.js';
 import { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } from './util.js';
 
 /** 24-hour clock? Follows the phone unless set in Settings. */
 export const is24 = () => data.settings.clock24 ?? new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
 
 const HEAT = ['var(--surface-2)', 'color-mix(in srgb, var(--accent) 30%, var(--card))', 'color-mix(in srgb, var(--accent) 54%, var(--card))', 'color-mix(in srgb, var(--accent) 77%, var(--card))', 'var(--accent)'];
-const HERO_SHARE = 0.7; // the clock section's share of the screen height
 
 function clockText(ms, countdown) {
   const [h, m, s] = hms(ms, countdown);
@@ -43,21 +42,23 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
           <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
         </div>
       </header>
-      <div class="clock home-clock" role="timer" aria-label="Current time"></div>
-      <div class="home-clock-sub"></div>
-    </section>
-    <div class="bento home-bento">
+      <div class="hero-stage">
+        <div class="clock home-clock" role="timer" aria-label="Current time"></div>
+        <div class="home-clock-sub"></div>
+      </div>
       <div class="live-slot"></div>
-    </div>`;
+      <button class="hero-cue" data-cue aria-label="Show today’s details"><span class="cue-text"></span>${icon('chevronDown')}</button>
+    </section>
+    <div class="bento home-bento"></div>`;
   const hero = root.querySelector('.home-hero');
   const clockEl = root.querySelector('.home-clock');
   const sub = root.querySelector('.home-clock-sub');
+  const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
   let face = makeFace(clockEl, data.settings.face);
   let minuteKey = '';
   let chartW = 0;
-  let introDone = false;
 
   function digits(now) {
     const d = new Date(now);
@@ -67,11 +68,11 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     return out;
   }
 
-  /** Hero = 70% of the screen. Portrait stacks the cards; landscape puts them side by side. */
+  /** The clock gets the whole screen; the cards wait below it. */
   function fit() {
     if (!visible()) return;
     const landscape = document.getElementById('app').classList.contains('landscape');
-    const heroH = Math.round(clamp(innerHeight * HERO_SHARE, 240, Math.max(240, root.clientHeight - 40)));
+    const heroH = Math.round(Math.max(260, root.clientHeight - parseFloat(getComputedStyle(root).paddingTop) - 8));
     hero.style.height = `${heroH}px`;
     const W = clockEl.clientWidth;
     const H = clockEl.clientHeight;
@@ -85,8 +86,8 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     root.querySelector('.greet').textContent = greeting(d.getHours());
     root.querySelector('.home-date').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
     const today = dayData(dayKey(now), now).total;
-    const ampm = is24() ? '' : `<span class="ampm">${d.getHours() < 12 ? 'AM' : 'PM'}</span>`;
-    sub.innerHTML = `${ampm}<span>${today ? `${fmtDur(today)} focused today` : 'Nothing logged yet today'}</span>`;
+    sub.innerHTML = is24() ? '' : `<span class="ampm">${d.getHours() < 12 ? 'AM' : 'PM'}</span>`;
+    cue.textContent = today ? `${fmtDur(today)} focused today` : 'Your day';
   }
 
   /* ---------- the clock you're running ---------- */
@@ -110,8 +111,10 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     const m = engine.busy();
     const key = m ? `${m}|${engine.running(m)}|${engine.runner(m).phase}|${data.settings.cat}` : '';
     if (slot.dataset.key !== key) {
+      const had = !!slot.dataset.key;
       slot.dataset.key = key;
       slot.innerHTML = m ? liveHtml(m) : '';
+      if (had !== !!m) fit(); // the clock makes room for the card, or takes the space back
     }
     if (!m) return;
     const t = slot.querySelector('.live-time');
@@ -121,59 +124,44 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
 
   /* ---------- cards ---------- */
 
-  /** Today: goal rings when you've set a goal, otherwise a donut of today's time by category. */
+  /**
+   * Today: one ring, split by category. With a daily goal it fills toward the goal;
+   * without one it's simply today's time.
+   */
   function todayCard(today, now) {
-    const goals = data.cats.filter((c) => c.goal > 0).slice(0, 4);
-    const goalAll = goalFor(null);
-    const hasGoal = goals.length > 0 || goalAll > 0;
+    const goal = goalFor(null);
     const size = 132;
     const c = size / 2;
-    let svg = '';
-    let center = '';
-    let sub;
-    let rows;
-    if (hasGoal) {
-      const list = goals.map((g) => ({ color: g.color, name: g.name, v: today.cats[g.id] || 0, g: g.goal * MIN }));
-      const rings = list.length ? list : [{ color: 'var(--accent)', name: 'Today', v: today.total, g: goalAll }];
-      const sw = rings.length > 2 ? 10 : 13;
-      rings.forEach((r, i) => {
-        const rad = c - sw / 2 - i * (sw + 3);
-        if (rad < sw) return;
-        const C = 2 * Math.PI * rad;
-        const p = Math.min(1, r.v / r.g);
-        svg += `<circle cx="${c}" cy="${c}" r="${rad}" style="fill:none;stroke:${r.color};stroke-opacity:.2;stroke-width:${sw}"/>`;
-        if (p > 0) {
-          svg += `<circle cx="${c}" cy="${c}" r="${rad}" transform="rotate(-90 ${c} ${c})" stroke-linecap="round"
-            style="fill:none;stroke:${r.color};stroke-width:${sw}" stroke-dasharray="${(p * C).toFixed(2)} ${C.toFixed(2)}"><title>${esc(r.name)}: ${fmtDur(r.v)} of ${fmtDur(r.g)}</title></circle>`;
-        }
-      });
-      const pct = goalAll ? Math.round((today.total / goalAll) * 100) : 0;
-      center = goalAll ? `<text x="${c}" y="${c}" dy="0.35em" text-anchor="middle" class="ring-center">${pct}%</text>` : '';
-      sub = goalAll ? (pct >= 100 ? 'Daily goal reached 🎉' : `of your ${fmtDur(goalAll)} daily goal`) : 'focused today';
-      rows = list.map((r) => ({ color: r.color, name: r.name, val: `${fmtDur(r.v)} / ${fmtDur(r.g)}` }));
-    } else {
-      // No goal: the ring is simply today's time, split by category (2px gaps between slices).
-      const sw = 14;
-      const rad = c - sw / 2;
-      const C = 2 * Math.PI * rad;
-      svg += `<circle cx="${c}" cy="${c}" r="${rad}" style="fill:none;stroke:var(--surface-2);stroke-width:${sw}"/>`;
-      const ids = [...data.cats.map((x) => x.id), ...Object.keys(today.cats)].filter((id, i, arr) => arr.indexOf(id) === i && today.cats[id] > 0);
-      const gap = ids.length > 1 ? 3 : 0;
-      let off = 0;
-      for (const id of ids) {
-        const len = (today.cats[id] / today.total) * C;
-        const seg = Math.max(0.6, len - gap);
-        svg += `<circle cx="${c}" cy="${c}" r="${rad}" transform="rotate(-90 ${c} ${c})" style="fill:none;stroke:${esc(catById(id).color)};stroke-width:${sw}"
-          stroke-dasharray="${seg.toFixed(2)} ${(C - seg).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"><title>${esc(catById(id).name)}: ${fmtDur(today.cats[id])}</title></circle>`;
-        off += len;
-      }
-      const n = sessionsOnDay(dayKey(now), now).length;
-      center = n
-        ? `<text x="${c}" y="${c - 6}" text-anchor="middle" class="ring-center">${n}</text><text x="${c}" y="${c + 14}" text-anchor="middle" class="ring-center-sub">${n === 1 ? 'session' : 'sessions'}</text>`
-        : '';
-      sub = today.total ? 'focused today' : 'Nothing logged yet today';
-      rows = ids.map((id) => ({ color: catById(id).color, name: catById(id).name, val: fmtDur(today.cats[id]) }));
+    const sw = 14;
+    const rad = c - sw / 2;
+    const C = 2 * Math.PI * rad;
+    const ids = [...data.cats.map((x) => x.id), ...Object.keys(today.cats)].filter((id, i, arr) => arr.indexOf(id) === i && today.cats[id] > 0);
+    const fill = goal ? Math.min(1, today.total / goal) : today.total ? 1 : 0;
+    const gap = ids.length > 1 ? 3 : 0;
+    let svg = `<circle cx="${c}" cy="${c}" r="${rad}" style="fill:none;stroke:var(--surface-2);stroke-width:${sw}"/>`;
+    let off = 0;
+    for (const id of ids) {
+      const len = (today.cats[id] / today.total) * C * fill;
+      const seg = Math.max(0.6, len - gap);
+      svg += `<circle cx="${c}" cy="${c}" r="${rad}" transform="rotate(-90 ${c} ${c})" style="fill:none;stroke:${esc(catById(id).color)};stroke-width:${sw}"
+        stroke-dasharray="${seg.toFixed(2)} ${(C - seg).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"><title>${esc(catById(id).name)}: ${fmtDur(today.cats[id])}</title></circle>`;
+      off += len;
     }
+    const n = sessionsOnDay(dayKey(now), now).length;
+    const two = (big, small) =>
+      `<text x="${c}" y="${c - 5}" text-anchor="middle" class="ring-center">${big}</text><text x="${c}" y="${c + 15}" text-anchor="middle" class="ring-center-sub">${small}</text>`;
+    const center = goal ? two(`${Math.round((today.total / goal) * 100)}%`, `of ${fmtDur(goal)}`) : n ? two(n, n === 1 ? 'session' : 'sessions') : '';
+    const sub = goal
+      ? today.total >= goal
+        ? 'Daily goal reached'
+        : `${fmtDur(goal - today.total)} to your daily goal`
+      : today.total
+        ? 'focused today'
+        : 'Nothing logged yet today';
+    const rows = ids.map((id) => {
+      const cat = catById(id);
+      return { color: cat.color, name: cat.name, val: `${fmtDur(today.cats[id])}${cat.goal ? ` / ${fmtDur(cat.goal * MIN)}` : ''}` };
+    });
     return `<section class="dash-card rings-card g-m">
         <div class="rings"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Today">${svg}${center}</svg></div>
         <div class="rings-info">
@@ -181,7 +169,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
           <div class="rings-total">${fmtDur(today.total)}</div>
           <div class="rings-sub">${sub}</div>
           ${rows.length ? `<div class="ring-rows">${rows.map((r) => `<div class="ring-row"><span class="dot" style="--c:${esc(r.color)}"></span><span class="rr-name">${esc(r.name)}</span><span class="rr-val">${r.val}</span></div>`).join('')}</div>` : ''}
-          <button class="chip goal-chip" data-goal>${icon(hasGoal ? 'edit' : 'plus')}${hasGoal ? 'Edit goal' : 'Set a daily goal'}</button>
+          <button class="chip goal-chip" data-goal>${goal ? `${icon('edit')}Daily goal · ${fmtDur(goal)}` : `${icon('plus')}Set a daily goal`}</button>
         </div>
       </section>`;
   }
@@ -313,23 +301,15 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     const now = Date.now();
     const t = dayKey(now);
     const goal = goalFor(null);
-    for (const n of [...bento.children]) if (n !== slot) n.remove();
-    bento.insertAdjacentHTML(
-      'beforeend',
+    bento.innerHTML =
       todayCard(dayData(t, now), now) +
         `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${goal ? `<span class="legend-goal"><i></i>Goal ${fmtDur(goal)}</span>` : ''}</div><div class="chart-slot" data-chart="week"></div></section>` +
         `<section class="dash-card g-m"><div class="card-head"><h3>Consistency</h3><span data-note></span></div><div class="chart-slot" data-chart="heat"></div>
           <div class="hm-legend"><span>Less</span>${HEAT.map((f) => `<i style="background:${f}"></i>`).join('')}<span>More</span>${goal ? '<span class="hm-note">· full colour = goal met</span>' : ''}</div></section>` +
         recentCard(now) +
-        `<button class="btn block ghost see-all" data-go="stats">${icon('stats')}<span>See all statistics</span></button>`
-    );
+        `<button class="btn block ghost see-all" data-go="stats">${icon('stats')}<span>See all statistics</span></button>`;
     drawCharts(now);
     header(now);
-    if (!introDone) {
-      introDone = true; // cards float in once, not on every refresh
-      bento.classList.add('intro');
-      setTimeout(() => bento.classList.remove('intro'), 1200);
-    }
   }
 
   function tick(now = Date.now(), animate = true) {
@@ -357,7 +337,8 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     }
     if (e.target.closest('[data-settings]')) return openSettings();
     if (e.target.closest('[data-looks]')) return openLooks();
-    if (e.target.closest('[data-goal]')) return openCategoryEditor(currentCat(), refresh);
+    if (e.target.closest('[data-goal]')) return openGoalSheet(refresh);
+    if (e.target.closest('[data-cue]')) return root.scrollTo({ top: bento.offsetTop - parseFloat(getComputedStyle(root).paddingTop), behavior: 'smooth' });
     const go = e.target.closest('[data-go]');
     if (go) return goTab(go.dataset.go);
     const s = e.target.closest('[data-sess]');

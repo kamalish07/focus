@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -221,7 +221,7 @@ const DEFAULT_SETTINGS = {
   sound: 'chime',
   volume: 0.8,
   vibrate: true,
-  goal: 0, // minutes per day across all categories; 0 = sum of category goals
+  goal: 0, // daily goal in minutes, all categories together; 0 = no goal
   weekStart: 1,
   dayStart: 0, // hour a new "day" begins, for night owls
   minSave: 30, // seconds; shorter sessions are not kept
@@ -257,7 +257,7 @@ function freshRunner(mode = 'stopwatch', s = DEFAULT_SETTINGS) {
 
 function defaults() {
   return {
-    v: 4,
+    v: 5,
     settings: structuredClone(DEFAULT_SETTINGS),
     cats: [{ id: 'study', name: 'Study', color: PALETTE[0], goal: 0 }], // goals are optional
     sessions: [],
@@ -273,6 +273,8 @@ function normalize(d) {
   if ((d.v || 1) < 3 && settings.format === 'hms') settings.format = 'auto';
   // Version 4: goals are opt-in. Clear the 3-hour goal that used to be set by default (only if untouched).
   if ((d.v || 1) < 4) for (const c of d.cats || []) if (c && c.id === 'study' && c.goal === 180) c.goal = 0;
+  // Version 5: the daily goal is one explicit total. Keep what the category goals used to add up to.
+  if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id) : [];
@@ -300,7 +302,7 @@ function normalize(d) {
       s.run = null;
     }
   }
-  return { v: 4, settings, cats: cats.length ? cats : def.cats, sessions, runners };
+  return { v: 5, settings, cats: cats.length ? cats : def.cats, sessions, runners };
 }
 
 /** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
@@ -318,6 +320,7 @@ function demoData() {
     { id: 'read', name: 'Reading', color: PALETTE[2], goal: 30 },
   ];
   if (noGoal) for (const c of d.cats) c.goal = 0;
+  else d.settings.goal = 240;
   let seed = 7;
   const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const today = new Date();
@@ -408,10 +411,10 @@ function currentCat() {
   return c;
 }
 
-/** Daily goal in ms for a category, or for everything when catId is null. */
+/** Daily goal in ms for a category, or the overall daily goal (all categories) when catId is null. 0 = no goal. */
 function goalFor(catId) {
   if (catId) return (catById(catId).goal || 0) * MIN;
-  return (data.settings.goal || data.cats.reduce((a, c) => a + (c.goal || 0), 0)) * MIN;
+  return (data.settings.goal || 0) * MIN;
 }
 
 function nextColor() {
@@ -2185,7 +2188,7 @@ const segEl = (key, value, options, label = '') =>
     .join('')}</div>`;
 
 function fmtStep(v, fmt, unit) {
-  if (fmt === 'goal') return v ? fmtDur(v * MIN) : 'Auto';
+  if (fmt === 'goal') return v ? fmtDur(v * MIN) : 'Off';
   return `${v}${unit ? ` ${unit}` : ''}`;
 }
 
@@ -2396,6 +2399,47 @@ function editPomodoro() {
   });
 }
 
+/* ---------- daily goal ---------- */
+
+/** One goal for the whole day: the total across every category. */
+function openGoalSheet(onDone) {
+  const cur = data.settings.goal || 0;
+  const presets = [30, 60, 120, 180, 240, 360];
+  const sh = sheet({
+    title: 'Daily goal',
+    body: `<p class="hint">How long you want to focus each day, all categories together.</p>
+      <div class="wheels"></div>
+      <div class="chips center">${presets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('')}</div>
+      ${actions(cur ? 'Save' : 'Set goal', cur ? '<button class="btn" data-clear>No goal</button>' : '')}`,
+  });
+  const box = sh.body.querySelector('.wheels');
+  const wh = wheel({ max: 16, label: 'h' });
+  const wm = wheel({ max: 55, step: 5, label: 'm' });
+  box.append(wh, wm);
+  const setTo = (m, smooth) => {
+    wh.set(Math.floor(m / 60), smooth);
+    wm.set(Math.round((m % 60) / 5) * 5, smooth);
+  };
+  setTo(cur || 120);
+  const done = (v) => {
+    data.settings.goal = v;
+    save();
+    sh.close();
+    onDone?.();
+    toast(v ? `Daily goal: ${fmtDur(v * MIN)}` : 'Daily goal removed');
+  };
+  sh.body.addEventListener('click', (e) => {
+    const set = e.target.closest('[data-set]');
+    if (set) {
+      setTo(Number(set.dataset.set), true);
+      haptic();
+      return;
+    }
+    if (e.target.closest('[data-clear]')) return done(0);
+    if (e.target.closest('[data-save]')) done(wh.get() * 60 + wm.get());
+  });
+}
+
 /* ---------- categories ---------- */
 
 function openCategories() {
@@ -2450,7 +2494,7 @@ function openCategoryEditor(cat, onDone) {
         ${PALETTE.map((col) => `<button class="swatch" data-color="${col}" style="--c:${col}" aria-label="Colour ${col}" aria-pressed="${col === c.color}"></button>`).join('')}
         <label class="swatch custom" style="--c:${esc(c.color)}" aria-label="Custom colour"><input type="color" value="${esc(c.color)}"></label>
       </div></div>
-      <div class="field"><span class="field-label">Daily goal</span><div class="wheels"></div><p class="hint small">Leave at 0h 00m for no goal.</p></div>
+      <div class="field"><span class="field-label">Goal for this category</span><div class="wheels"></div><p class="hint small">Optional. Leave at 0h 00m for none. Your overall daily goal is set on Home.</p></div>
       ${actions('Save', canDelete ? `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>` : '')}`,
   });
   const box = sh.body.querySelector('.wheels');
@@ -2610,7 +2654,7 @@ function openSessionEditor(s, dayK, onDone) {
     toast(isNew ? `Added ${fmtDur(newDur)} to ${catById(catId).name}` : 'Session updated');
   });
 }
-return { openEditor, openCategories, openCategoryEditor, openSessionEditor };
+return { openEditor, openGoalSheet, openCategories, openCategoryEditor, openSessionEditor };
 })();
 
 // ---------- stats.js ----------
@@ -2987,20 +3031,19 @@ return { mountStats };
 
 // ---------- home.js ----------
 __m.home = (() => {
-// Home: the current time as a big flip clock filling about 70% of the screen, and below
-// it a card grid with the clock you're running, today's time, this week and your consistency.
-const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, currentCat, recentSessions, sessionsOnDay, sessionDur, sessionEnd } = __m.store;
+// Home: the current time fills the screen. Scroll down and the day's details rise into
+// view: today's time, this week, your consistency and recent sessions.
+const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd } = __m.store;
 const engine = __m.engine;
 const { makeFace } = __m.faces;
 const { icon } = __m.ui;
-const { openSessionEditor, openCategoryEditor } = __m.sheets;
+const { openSessionEditor, openGoalSheet } = __m.sheets;
 const { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } = __m.util;
 
 /** 24-hour clock? Follows the phone unless set in Settings. */
 const is24 = () => data.settings.clock24 ?? new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
 
 const HEAT = ['var(--surface-2)', 'color-mix(in srgb, var(--accent) 30%, var(--card))', 'color-mix(in srgb, var(--accent) 54%, var(--card))', 'color-mix(in srgb, var(--accent) 77%, var(--card))', 'var(--accent)'];
-const HERO_SHARE = 0.7; // the clock section's share of the screen height
 
 function clockText(ms, countdown) {
   const [h, m, s] = hms(ms, countdown);
@@ -3032,21 +3075,23 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
           <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
         </div>
       </header>
-      <div class="clock home-clock" role="timer" aria-label="Current time"></div>
-      <div class="home-clock-sub"></div>
-    </section>
-    <div class="bento home-bento">
+      <div class="hero-stage">
+        <div class="clock home-clock" role="timer" aria-label="Current time"></div>
+        <div class="home-clock-sub"></div>
+      </div>
       <div class="live-slot"></div>
-    </div>`;
+      <button class="hero-cue" data-cue aria-label="Show today’s details"><span class="cue-text"></span>${icon('chevronDown')}</button>
+    </section>
+    <div class="bento home-bento"></div>`;
   const hero = root.querySelector('.home-hero');
   const clockEl = root.querySelector('.home-clock');
   const sub = root.querySelector('.home-clock-sub');
+  const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
   let face = makeFace(clockEl, data.settings.face);
   let minuteKey = '';
   let chartW = 0;
-  let introDone = false;
 
   function digits(now) {
     const d = new Date(now);
@@ -3056,11 +3101,11 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     return out;
   }
 
-  /** Hero = 70% of the screen. Portrait stacks the cards; landscape puts them side by side. */
+  /** The clock gets the whole screen; the cards wait below it. */
   function fit() {
     if (!visible()) return;
     const landscape = document.getElementById('app').classList.contains('landscape');
-    const heroH = Math.round(clamp(innerHeight * HERO_SHARE, 240, Math.max(240, root.clientHeight - 40)));
+    const heroH = Math.round(Math.max(260, root.clientHeight - parseFloat(getComputedStyle(root).paddingTop) - 8));
     hero.style.height = `${heroH}px`;
     const W = clockEl.clientWidth;
     const H = clockEl.clientHeight;
@@ -3074,8 +3119,8 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     root.querySelector('.greet').textContent = greeting(d.getHours());
     root.querySelector('.home-date').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
     const today = dayData(dayKey(now), now).total;
-    const ampm = is24() ? '' : `<span class="ampm">${d.getHours() < 12 ? 'AM' : 'PM'}</span>`;
-    sub.innerHTML = `${ampm}<span>${today ? `${fmtDur(today)} focused today` : 'Nothing logged yet today'}</span>`;
+    sub.innerHTML = is24() ? '' : `<span class="ampm">${d.getHours() < 12 ? 'AM' : 'PM'}</span>`;
+    cue.textContent = today ? `${fmtDur(today)} focused today` : 'Your day';
   }
 
   /* ---------- the clock you're running ---------- */
@@ -3099,8 +3144,10 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     const m = engine.busy();
     const key = m ? `${m}|${engine.running(m)}|${engine.runner(m).phase}|${data.settings.cat}` : '';
     if (slot.dataset.key !== key) {
+      const had = !!slot.dataset.key;
       slot.dataset.key = key;
       slot.innerHTML = m ? liveHtml(m) : '';
+      if (had !== !!m) fit(); // the clock makes room for the card, or takes the space back
     }
     if (!m) return;
     const t = slot.querySelector('.live-time');
@@ -3110,59 +3157,44 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
 
   /* ---------- cards ---------- */
 
-  /** Today: goal rings when you've set a goal, otherwise a donut of today's time by category. */
+  /**
+   * Today: one ring, split by category. With a daily goal it fills toward the goal;
+   * without one it's simply today's time.
+   */
   function todayCard(today, now) {
-    const goals = data.cats.filter((c) => c.goal > 0).slice(0, 4);
-    const goalAll = goalFor(null);
-    const hasGoal = goals.length > 0 || goalAll > 0;
+    const goal = goalFor(null);
     const size = 132;
     const c = size / 2;
-    let svg = '';
-    let center = '';
-    let sub;
-    let rows;
-    if (hasGoal) {
-      const list = goals.map((g) => ({ color: g.color, name: g.name, v: today.cats[g.id] || 0, g: g.goal * MIN }));
-      const rings = list.length ? list : [{ color: 'var(--accent)', name: 'Today', v: today.total, g: goalAll }];
-      const sw = rings.length > 2 ? 10 : 13;
-      rings.forEach((r, i) => {
-        const rad = c - sw / 2 - i * (sw + 3);
-        if (rad < sw) return;
-        const C = 2 * Math.PI * rad;
-        const p = Math.min(1, r.v / r.g);
-        svg += `<circle cx="${c}" cy="${c}" r="${rad}" style="fill:none;stroke:${r.color};stroke-opacity:.2;stroke-width:${sw}"/>`;
-        if (p > 0) {
-          svg += `<circle cx="${c}" cy="${c}" r="${rad}" transform="rotate(-90 ${c} ${c})" stroke-linecap="round"
-            style="fill:none;stroke:${r.color};stroke-width:${sw}" stroke-dasharray="${(p * C).toFixed(2)} ${C.toFixed(2)}"><title>${esc(r.name)}: ${fmtDur(r.v)} of ${fmtDur(r.g)}</title></circle>`;
-        }
-      });
-      const pct = goalAll ? Math.round((today.total / goalAll) * 100) : 0;
-      center = goalAll ? `<text x="${c}" y="${c}" dy="0.35em" text-anchor="middle" class="ring-center">${pct}%</text>` : '';
-      sub = goalAll ? (pct >= 100 ? 'Daily goal reached 🎉' : `of your ${fmtDur(goalAll)} daily goal`) : 'focused today';
-      rows = list.map((r) => ({ color: r.color, name: r.name, val: `${fmtDur(r.v)} / ${fmtDur(r.g)}` }));
-    } else {
-      // No goal: the ring is simply today's time, split by category (2px gaps between slices).
-      const sw = 14;
-      const rad = c - sw / 2;
-      const C = 2 * Math.PI * rad;
-      svg += `<circle cx="${c}" cy="${c}" r="${rad}" style="fill:none;stroke:var(--surface-2);stroke-width:${sw}"/>`;
-      const ids = [...data.cats.map((x) => x.id), ...Object.keys(today.cats)].filter((id, i, arr) => arr.indexOf(id) === i && today.cats[id] > 0);
-      const gap = ids.length > 1 ? 3 : 0;
-      let off = 0;
-      for (const id of ids) {
-        const len = (today.cats[id] / today.total) * C;
-        const seg = Math.max(0.6, len - gap);
-        svg += `<circle cx="${c}" cy="${c}" r="${rad}" transform="rotate(-90 ${c} ${c})" style="fill:none;stroke:${esc(catById(id).color)};stroke-width:${sw}"
-          stroke-dasharray="${seg.toFixed(2)} ${(C - seg).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"><title>${esc(catById(id).name)}: ${fmtDur(today.cats[id])}</title></circle>`;
-        off += len;
-      }
-      const n = sessionsOnDay(dayKey(now), now).length;
-      center = n
-        ? `<text x="${c}" y="${c - 6}" text-anchor="middle" class="ring-center">${n}</text><text x="${c}" y="${c + 14}" text-anchor="middle" class="ring-center-sub">${n === 1 ? 'session' : 'sessions'}</text>`
-        : '';
-      sub = today.total ? 'focused today' : 'Nothing logged yet today';
-      rows = ids.map((id) => ({ color: catById(id).color, name: catById(id).name, val: fmtDur(today.cats[id]) }));
+    const sw = 14;
+    const rad = c - sw / 2;
+    const C = 2 * Math.PI * rad;
+    const ids = [...data.cats.map((x) => x.id), ...Object.keys(today.cats)].filter((id, i, arr) => arr.indexOf(id) === i && today.cats[id] > 0);
+    const fill = goal ? Math.min(1, today.total / goal) : today.total ? 1 : 0;
+    const gap = ids.length > 1 ? 3 : 0;
+    let svg = `<circle cx="${c}" cy="${c}" r="${rad}" style="fill:none;stroke:var(--surface-2);stroke-width:${sw}"/>`;
+    let off = 0;
+    for (const id of ids) {
+      const len = (today.cats[id] / today.total) * C * fill;
+      const seg = Math.max(0.6, len - gap);
+      svg += `<circle cx="${c}" cy="${c}" r="${rad}" transform="rotate(-90 ${c} ${c})" style="fill:none;stroke:${esc(catById(id).color)};stroke-width:${sw}"
+        stroke-dasharray="${seg.toFixed(2)} ${(C - seg).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"><title>${esc(catById(id).name)}: ${fmtDur(today.cats[id])}</title></circle>`;
+      off += len;
     }
+    const n = sessionsOnDay(dayKey(now), now).length;
+    const two = (big, small) =>
+      `<text x="${c}" y="${c - 5}" text-anchor="middle" class="ring-center">${big}</text><text x="${c}" y="${c + 15}" text-anchor="middle" class="ring-center-sub">${small}</text>`;
+    const center = goal ? two(`${Math.round((today.total / goal) * 100)}%`, `of ${fmtDur(goal)}`) : n ? two(n, n === 1 ? 'session' : 'sessions') : '';
+    const sub = goal
+      ? today.total >= goal
+        ? 'Daily goal reached'
+        : `${fmtDur(goal - today.total)} to your daily goal`
+      : today.total
+        ? 'focused today'
+        : 'Nothing logged yet today';
+    const rows = ids.map((id) => {
+      const cat = catById(id);
+      return { color: cat.color, name: cat.name, val: `${fmtDur(today.cats[id])}${cat.goal ? ` / ${fmtDur(cat.goal * MIN)}` : ''}` };
+    });
     return `<section class="dash-card rings-card g-m">
         <div class="rings"><svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" role="img" aria-label="Today">${svg}${center}</svg></div>
         <div class="rings-info">
@@ -3170,7 +3202,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
           <div class="rings-total">${fmtDur(today.total)}</div>
           <div class="rings-sub">${sub}</div>
           ${rows.length ? `<div class="ring-rows">${rows.map((r) => `<div class="ring-row"><span class="dot" style="--c:${esc(r.color)}"></span><span class="rr-name">${esc(r.name)}</span><span class="rr-val">${r.val}</span></div>`).join('')}</div>` : ''}
-          <button class="chip goal-chip" data-goal>${icon(hasGoal ? 'edit' : 'plus')}${hasGoal ? 'Edit goal' : 'Set a daily goal'}</button>
+          <button class="chip goal-chip" data-goal>${goal ? `${icon('edit')}Daily goal · ${fmtDur(goal)}` : `${icon('plus')}Set a daily goal`}</button>
         </div>
       </section>`;
   }
@@ -3302,23 +3334,15 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     const now = Date.now();
     const t = dayKey(now);
     const goal = goalFor(null);
-    for (const n of [...bento.children]) if (n !== slot) n.remove();
-    bento.insertAdjacentHTML(
-      'beforeend',
+    bento.innerHTML =
       todayCard(dayData(t, now), now) +
         `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${goal ? `<span class="legend-goal"><i></i>Goal ${fmtDur(goal)}</span>` : ''}</div><div class="chart-slot" data-chart="week"></div></section>` +
         `<section class="dash-card g-m"><div class="card-head"><h3>Consistency</h3><span data-note></span></div><div class="chart-slot" data-chart="heat"></div>
           <div class="hm-legend"><span>Less</span>${HEAT.map((f) => `<i style="background:${f}"></i>`).join('')}<span>More</span>${goal ? '<span class="hm-note">· full colour = goal met</span>' : ''}</div></section>` +
         recentCard(now) +
-        `<button class="btn block ghost see-all" data-go="stats">${icon('stats')}<span>See all statistics</span></button>`
-    );
+        `<button class="btn block ghost see-all" data-go="stats">${icon('stats')}<span>See all statistics</span></button>`;
     drawCharts(now);
     header(now);
-    if (!introDone) {
-      introDone = true; // cards float in once, not on every refresh
-      bento.classList.add('intro');
-      setTimeout(() => bento.classList.remove('intro'), 1200);
-    }
   }
 
   function tick(now = Date.now(), animate = true) {
@@ -3346,7 +3370,8 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     }
     if (e.target.closest('[data-settings]')) return openSettings();
     if (e.target.closest('[data-looks]')) return openLooks();
-    if (e.target.closest('[data-goal]')) return openCategoryEditor(currentCat(), refresh);
+    if (e.target.closest('[data-goal]')) return openGoalSheet(refresh);
+    if (e.target.closest('[data-cue]')) return root.scrollTo({ top: bento.offsetTop - parseFloat(getComputedStyle(root).paddingTop), behavior: 'smooth' });
     const go = e.target.closest('[data-go]');
     if (go) return goTab(go.dataset.go);
     const s = e.target.closest('[data-sess]');
@@ -3411,15 +3436,17 @@ return { isStandalone, isIOS, canPromptInstall, promptInstall, initPWA, notify }
 
 // ---------- looks.js ----------
 __m.looks = (() => {
-// Templates: complete one-tap looks (style + theme + font + options), each shown as a
-// live preview in its own colours.
-const { data, saveSoon, emit } = __m.store;
+// Looks: four templates up front, the colour theme, and a door to everything else
+// (all templates, clock styles, fonts, colours) on the Customize page.
+const { data, saveSoon, emit, on } = __m.store;
 const { TEMPLATES, THEMES, LOOK_DEFAULTS, templateLook, fontById } = __m.config;
 const { makeFace } = __m.faces;
 const { sheet, icon, haptic, toast } = __m.ui;
-const { esc } = __m.util;
+const engine = __m.engine;
+const { esc, hms, pad } = __m.util;
 
 const SAMPLE = { date: new Date(2020, 0, 1, 10, 9, 34), ms: 12 * 60000 + 34000 };
+const FEATURED = ['classic', 'nixie', 'aurora', 'watch'];
 
 function applyTemplate(id) {
   const t = TEMPLATES.find((x) => x.id === id);
@@ -3429,29 +3456,71 @@ function applyTemplate(id) {
   emit('settings');
 }
 
-/** Buttons for every template; call drawTemplates(container) once they're in the page. */
-function templatesHtml() {
-  return `<div class="tpls">${TEMPLATES.map((t) => {
-    const look = templateLook(t);
+/** A hand-made change to the look: it's no longer an untouched template. */
+function setLook(patch) {
+  Object.assign(data.settings, patch, { template: null });
+  saveSoon();
+  emit('settings');
+}
+
+/** The four shown up front. The template you're using always stays in view. */
+function featuredTemplates() {
+  const ids = [...FEATURED];
+  const cur = data.settings.template;
+  if (cur && !ids.includes(cur) && TEMPLATES.some((t) => t.id === cur)) ids[3] = cur;
+  return ids.map((id) => TEMPLATES.find((t) => t.id === id));
+}
+
+function tplTile(t) {
+  const look = templateLook(t);
+  const c = THEMES[look.theme] || THEMES.classic;
+  const f = fontById(look.font);
+  const vars = [
+    `--bg:${c.bg}`,
+    `--card:${c.card}`,
+    `--digit:${c.digit}`,
+    `--accent:${c.accent}`,
+    `--face:${look.faceColor !== 'auto' ? look.faceColor : 'initial'}`, // 'initial' = use the style's own colour
+    `--glow:${look.glow}`,
+    `--digit-font:${f.family}`,
+    `--digit-weight:${f.weight}`,
+    `--ls:${f.ls || 0}em`,
+  ].join(';');
+  const cls = ['tpl', 'themed', look.shade ? 'card-shade' : '', `bd-${look.backdrop}`].join(' ');
+  return `<button class="${cls}" data-tpl="${t.id}" aria-pressed="${data.settings.template === t.id}" style="${esc(vars)}">
+      <span class="clock tpl-mini"></span><span class="tpl-name">${esc(t.name)}</span></button>`;
+}
+
+/** Template buttons; call drawTemplates(container) once they're in the page. */
+function templatesHtml(list = TEMPLATES, cls = '') {
+  return `<div class="tpls ${cls}">${list.map(tplTile).join('')}</div>`;
+}
+
+/** The way into the Customize page: a fan of other looks, so it's clear there's more. */
+function moreLooksHtml() {
+  const fan = ['neon', 'bedside', 'mint'].map((id, i) => {
+    const look = templateLook(TEMPLATES.find((t) => t.id === id));
     const c = THEMES[look.theme] || THEMES.classic;
-    const f = fontById(look.font);
-    const vars = [
-      `--bg:${c.bg}`,
-      `--card:${c.card}`,
-      `--digit:${c.digit}`,
-      `--accent:${c.accent}`,
-      `--face:${look.faceColor !== 'auto' ? look.faceColor : 'initial'}`, // 'initial' = use the style's own colour
-      `--glow:${look.glow}`,
-      `--digit-font:${f.family}`,
-      `--digit-weight:${f.weight}`,
-      `--ls:${f.ls || 0}em`,
-    ]
-      .filter(Boolean)
-      .join(';');
-    const cls = ['tpl', 'themed', look.shade ? 'card-shade' : '', `bd-${look.backdrop}`].join(' ');
-    return `<button class="${cls}" data-tpl="${t.id}" aria-pressed="${data.settings.template === t.id}" style="${esc(vars)}">
-        <span class="clock tpl-mini"></span><span class="tpl-name">${esc(t.name)}</span></button>`;
-  }).join('')}</div>`;
+    const ink = look.faceColor !== 'auto' ? look.faceColor : c.digit;
+    return `<i style="--b:${esc(c.bg)};--d:${esc(ink)};--f:${esc(fontById(look.font).family)}">${'739'[i]}</i>`;
+  });
+  const more = TEMPLATES.length - FEATURED.length;
+  return `<button class="more-looks" data-more>
+      <span class="ml-fan" aria-hidden="true">${fan.join('')}<span class="ml-badge">${icon('settings')}</span></span>
+      <span class="ml-text"><span class="ml-title">More looks</span><span class="ml-sub">${more} more templates, clock styles, fonts and colours</span></span>
+      ${icon('chevronRight', 'ml-chev')}
+    </button>`;
+}
+
+const themeTile = (id, t, name) =>
+  `<button class="theme-tile" data-theme="${id}" aria-pressed="${data.settings.theme === id}" style="--tb:${esc(t.bg)};--tc:${esc(t.card)};--td:${esc(t.digit)};--ta:${esc(t.accent)}">
+    <span class="tt-card">25</span><span class="tt-name">${esc(name)}</span></button>`;
+
+/** Colour themes in one swipeable row. Your own colours join the row once you've made them. */
+function themesHtml() {
+  const s = data.settings;
+  const custom = s.theme === 'custom' ? themeTile('custom', s.custom, 'Custom') : '';
+  return `<div class="themes strip">${custom}${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}</div>`;
 }
 
 /** Fills each template tile with a real mini clock and keeps it fitted. Returns a cleanup function. */
@@ -3476,63 +3545,110 @@ function markTemplates(container) {
   container.querySelectorAll('.tpl').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tpl === data.settings.template)));
 }
 
-/** Quick picker from the clock screen. */
-function openLooks({ onCustomize } = {}) {
+function markThemes(container) {
+  container.querySelectorAll('.theme-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === data.settings.theme)));
+}
+
+/**
+ * The simple looks panel (templates, "More looks", theme) inside `box`.
+ * Handles its own taps; `onMore` opens the Customize page. Returns { render, destroy }.
+ */
+function looksPanel(box, { onMore, onApply } = {}) {
   let cleanup = null;
-  const sh = sheet({
-    title: 'Looks',
-    cls: 'looks-sheet',
-    body: `${templatesHtml()}
-      <button class="btn block ghost" data-customize>${icon('settings')}<span>Customize further</span></button>`,
-    onClose: () => cleanup?.(),
-  });
-  cleanup = drawTemplates(sh.body);
-  sh.body.addEventListener('click', (e) => {
+  function render() {
+    cleanup?.();
+    box.innerHTML = `${templatesHtml(featuredTemplates(), 'featured')}${moreLooksHtml()}
+      <h3 class="looks-label">Theme</h3>${themesHtml()}`;
+    cleanup = drawTemplates(box);
+    // Bring the chosen theme into view within its row (without scrolling the page).
+    const strip = box.querySelector('.themes');
+    const sel = strip.querySelector('[aria-pressed="true"]');
+    if (sel) strip.scrollLeft += sel.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - sel.offsetWidth) / 2;
+  }
+  box.addEventListener('click', (e) => {
     const tpl = e.target.closest('[data-tpl]');
     if (tpl) {
       haptic(8);
       applyTemplate(tpl.dataset.tpl);
-      markTemplates(sh.body);
-      toast(`${tpl.querySelector('.tpl-name').textContent} applied`, { ms: 1800 });
+      markTemplates(box);
+      markThemes(box);
+      onApply?.(tpl.querySelector('.tpl-name').textContent);
       return;
     }
-    if (e.target.closest('[data-customize]')) {
-      sh.close();
-      setTimeout(() => onCustomize?.(), 340);
+    const th = e.target.closest('[data-theme]');
+    if (th) {
+      haptic(6);
+      setLook({ theme: th.dataset.theme });
+      markTemplates(box);
+      markThemes(box);
+      return;
     }
+    if (e.target.closest('[data-more]')) onMore?.();
+  });
+  render();
+  return { render, destroy: () => cleanup?.() };
+}
+
+/** Quick picker from the palette button. */
+function openLooks({ onMore } = {}) {
+  let panel = null;
+  const sh = sheet({
+    title: 'Looks',
+    cls: 'looks-sheet',
+    body: '<div class="looks-panel"></div>',
+    onClose: () => panel?.destroy(),
+  });
+  panel = looksPanel(sh.body.querySelector('.looks-panel'), {
+    onApply: (name) => toast(`${name} applied`, { ms: 1800 }),
+    onMore: () => {
+      sh.close();
+      setTimeout(() => onMore?.(), 340);
+    },
   });
 }
-return { applyTemplate, templatesHtml, drawTemplates, markTemplates, openLooks };
+
+/** A live clock showing the current look, kept sized to its box. Returns a cleanup function. */
+function mountPreview(el) {
+  let face = null;
+  const size = () => {
+    const W = Math.min(el.parentElement.clientWidth, 420);
+    const round = face && ['ring', 'analog'].includes(face.type);
+    el.style.width = `${W}px`;
+    el.style.height = `${Math.round(W * (round ? 0.62 : 0.44))}px`;
+    face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
+  };
+  const draw = (animate) => {
+    if (face?.type !== data.settings.face) {
+      face = makeFace(el, data.settings.face);
+      draw(false);
+      size();
+      return;
+    }
+    const ms = engine.displayMs();
+    const [, m, sec] = hms(ms, engine.isCountdown());
+    face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview', ms });
+  };
+  draw(false);
+  const iv = setInterval(() => draw(true), 200);
+  const offFit = on('fit', size);
+  return () => {
+    clearInterval(iv);
+    offFit();
+  };
+}
+return { applyTemplate, setLook, featuredTemplates, templatesHtml, moreLooksHtml, themesHtml, drawTemplates, markTemplates, markThemes, looksPanel, openLooks, mountPreview };
 })();
 
-// ---------- settings.js ----------
-__m.settings = (() => {
-const { data, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } = __m.store;
-const { THEMES, FONTS, SOUNDS, APP_VERSION, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } = __m.config;
-const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog, haptic } = __m.ui;
+// ---------- customize.js ----------
+__m.customize = (() => {
+// Customize: every template, clock style, font and colour, on a page of its own.
+// The colour theme stays on the simple Looks panel.
+const { data, saveSoon, emit, on } = __m.store;
+const { FONTS, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } = __m.config;
+const { sheet, switchEl, segEl, bindControls, haptic } = __m.ui;
 const { makeFace, FACES } = __m.faces;
-const { templatesHtml, drawTemplates, markTemplates, applyTemplate } = __m.looks;
-const engine = __m.engine;
-const audio = __m.audio;
-const pwa = __m.pwa;
-const { is24 } = __m.home;
-const { esc, getPath, setPath, hms, pad, downloadFile } = __m.util;
-
-const BG_SOUNDS = [
-  ['silent', 'Silent (recommended)'],
-  ['brown', 'Brown noise'],
-  ['pink', 'Pink noise'],
-  ['white', 'White noise'],
-  ['off', 'Off'],
-];
-
-const AREAS = [
-  ['looks', 'Looks'],
-  ['clock', 'Clock'],
-  ['timers', 'Timers'],
-  ['sound', 'Sound'],
-  ['data', 'Data'],
-];
+const { templatesHtml, drawTemplates, markTemplates, applyTemplate, mountPreview } = __m.looks;
+const { esc, getPath, setPath } = __m.util;
 
 const group = (title, inner, cls = '') =>
   `<section class="set-sec"><h3 class="group-title">${title}</h3><div class="group ${cls}">${inner}</div></section>`;
@@ -3548,50 +3664,35 @@ const COLOR_ROWS = [
   ['accent', 'Accent'],
 ];
 
-function hourLabel(h) {
-  if (h === 0) return 'Midnight';
-  return new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' });
-}
-
-let customizeOpen = false; // remembered while the app is open
-
-function openSettings({ customize = false } = {}) {
-  let offFit = null;
-  let iv = 0;
+function openCustomize({ onClose } = {}) {
   let tileRO = null;
   let tplCleanup = null;
-  let areaIO = null;
-  if (customize) customizeOpen = true;
+  let previewCleanup = null;
+  let offFit = null;
   const pg = sheet({
-    title: 'Settings',
+    title: 'Customize',
     kind: 'page',
-    body: '<div class="settings"></div>',
+    cls: 'customize-page',
+    body: '<div class="customize"></div>',
     onClose: () => {
-      offFit?.();
-      clearInterval(iv);
       tileRO?.disconnect();
       tplCleanup?.();
-      areaIO?.disconnect();
+      previewCleanup?.();
+      offFit?.();
+      onClose?.();
     },
   });
-  const scroller = pg.body;
-  const root = pg.body.querySelector('.settings');
-
-  /* ---------- building blocks ---------- */
-
-  const themeTile = (id, t, name) =>
-    `<button class="theme-tile" data-theme="${id}" aria-pressed="${data.settings.theme === id}" style="--tb:${esc(t.bg)};--tc:${esc(t.card)};--td:${esc(t.digit)};--ta:${esc(t.accent)}">
-      <span class="tt-card">25</span><span class="tt-name">${esc(name)}</span></button>`;
-
-  const fontTile = (f) =>
-    `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
-      <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
+  const root = pg.body.querySelector('.customize');
 
   const swatches = () =>
     `<div class="swatches sm">${FACE_COLORS.map(
       ([v, n]) =>
         `<button class="swatch${v === 'auto' ? ' auto' : ''}" data-fcolor="${v}" style="--c:${v === 'auto' ? 'transparent' : v}" title="${n}" aria-label="${n}" aria-pressed="${data.settings.faceColor === v}"></button>`
     ).join('')}</div>`;
+
+  const fontTile = (f) =>
+    `<button class="font-tile" data-font="${f.id}" aria-pressed="${data.settings.font === f.id}">
+      <span class="ft-num" style="font-family:${esc(f.family)};font-weight:${f.weight}">25</span><span class="ft-name">${esc(f.name)}</span></button>`;
 
   /** Options that only make sense for the chosen clock style. */
   function styleOptionsHtml() {
@@ -3620,10 +3721,12 @@ function openSettings({ customize = false } = {}) {
     return group(`${esc(name)} options`, rows[s.face] || rows.flip);
   }
 
-  function customizeHtml() {
+  function html() {
     const s = data.settings;
     const c = themeColors(s);
     return `
+      <div class="preview"><div class="clock preview-clock"></div></div>
+      ${group('All templates', templatesHtml(), 'pad')}
       ${group(
         'Clock style',
         `<div class="face-tiles">${FACES.map(
@@ -3633,14 +3736,13 @@ function openSettings({ customize = false } = {}) {
         'pad'
       )}
       <div class="style-opts">${styleOptionsHtml()}</div>
-      ${group('Theme', `<div class="themes">${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}${themeTile('custom', s.custom, 'Custom')}</div>`, 'pad')}
+      ${group('Digit font', `<div class="fonts">${FONTS.map(fontTile).join('')}</div>`, 'pad')}
       ${group(
-        'Colours',
+        'Your own colours',
         COLOR_ROWS.map(([k, label]) =>
           row(label, `<label class="color-in" style="--c:${esc(c[k])}"><input type="color" data-color="${k}" value="${esc(c[k])}" aria-label="${label} colour"></label>`)
         ).join('')
       )}
-      ${group('Digit font', `<div class="fonts">${FONTS.map(fontTile).join('')}</div>`, 'pad')}
       ${group(
         'Details',
         row('Digit size', range('digitScale', 0.8, 1.2, 0.01, 'Digit size')) +
@@ -3649,6 +3751,173 @@ function openSettings({ customize = false } = {}) {
           row('Tick sound', switchEl('tick', s.tick, 'Tick sound'), 'A soft click every second while running')
       )}`;
   }
+
+  /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
+  function drawFaceTiles() {
+    tileRO?.disconnect();
+    const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
+    tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
+    for (const tile of root.querySelectorAll('.face-tile')) {
+      const el = tile.querySelector('.face-mini');
+      el._face = makeFace(el, tile.dataset.face);
+      el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
+      fitMini(el);
+      tileRO.observe(el);
+    }
+  }
+
+  function render() {
+    root.innerHTML = html();
+    previewCleanup?.();
+    previewCleanup = mountPreview(root.querySelector('.preview-clock'));
+    tplCleanup?.();
+    tplCleanup = drawTemplates(root);
+    drawFaceTiles();
+  }
+
+  /** Brings every control in line with the settings after a template or theme change. */
+  function sync() {
+    const s = data.settings;
+    const c = themeColors(s);
+    markTemplates(root);
+    root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.face === s.face)));
+    root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.font === s.font)));
+    root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
+    root.querySelectorAll('input[data-color]').forEach((inp) => {
+      inp.value = c[inp.dataset.color];
+      inp.parentElement.style.setProperty('--c', c[inp.dataset.color]);
+    });
+    root.querySelectorAll('input[type="range"][data-key]').forEach((r) => (r.value = getPath(s, r.dataset.key)));
+    root.querySelectorAll('.seg[data-key]').forEach((sg) => {
+      const v = String(getPath(s, sg.dataset.key));
+      sg.querySelectorAll('[data-v]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.v === v)));
+    });
+  }
+
+  const changed = () => {
+    saveSoon();
+    emit('settings');
+  };
+  const lookChanged = () => {
+    data.settings.template = null;
+    markTemplates(root);
+  };
+
+  bindControls(root, {
+    get: (k) => getPath(data.settings, k),
+    set: (k, v) => {
+      setPath(data.settings, k, v);
+      if (LOOK_KEYS.has(k)) lookChanged();
+      changed();
+    },
+  });
+
+  root.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t.matches('input[data-color]')) return;
+    const s = data.settings;
+    s.custom = { ...themeColors(s), [t.dataset.color]: t.value };
+    s.theme = 'custom';
+    t.parentElement.style.setProperty('--c', t.value);
+    lookChanged();
+    changed();
+  });
+
+  root.addEventListener('click', (e) => {
+    const s = data.settings;
+    const tpl = e.target.closest('[data-tpl]');
+    if (tpl) {
+      haptic(8);
+      applyTemplate(tpl.dataset.tpl);
+      return sync();
+    }
+    const fc = e.target.closest('.face-tile');
+    if (fc) {
+      s.face = fc.dataset.face;
+      lookChanged();
+      root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
+      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
+      return changed();
+    }
+    const col = e.target.closest('[data-fcolor]');
+    if (col) {
+      s.faceColor = col.dataset.fcolor;
+      lookChanged();
+      col.parentElement.querySelectorAll('[data-fcolor]').forEach((b) => b.setAttribute('aria-pressed', String(b === col)));
+      return changed();
+    }
+    const ft = e.target.closest('[data-font]');
+    if (ft) {
+      s.font = ft.dataset.font;
+      lookChanged();
+      root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === ft)));
+      return changed();
+    }
+  });
+
+  render();
+  offFit = on('fit', drawFaceTiles);
+}
+return { openCustomize };
+})();
+
+// ---------- settings.js ----------
+__m.settings = (() => {
+const { data, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } = __m.store;
+const { SOUNDS, APP_VERSION } = __m.config;
+const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } = __m.ui;
+const { looksPanel, mountPreview } = __m.looks;
+const { openCustomize } = __m.customize;
+const engine = __m.engine;
+const audio = __m.audio;
+const pwa = __m.pwa;
+const { is24 } = __m.home;
+const { esc, getPath, setPath, downloadFile } = __m.util;
+
+const BG_SOUNDS = [
+  ['silent', 'Silent (recommended)'],
+  ['brown', 'Brown noise'],
+  ['pink', 'Pink noise'],
+  ['white', 'White noise'],
+  ['off', 'Off'],
+];
+
+const AREAS = [
+  ['looks', 'Looks'],
+  ['clock', 'Clock'],
+  ['timers', 'Timers'],
+  ['sound', 'Sound'],
+  ['data', 'Data'],
+];
+
+const group = (title, inner, cls = '') =>
+  `<section class="set-sec"><h3 class="group-title">${title}</h3><div class="group ${cls}">${inner}</div></section>`;
+const row = (label, ctl, hint = '') =>
+  `<div class="row"><div class="row-label">${label}${hint ? `<small>${hint}</small>` : ''}</div><div class="row-ctl">${ctl}</div></div>`;
+const range = (key, min, max, step, label) =>
+  `<input type="range" data-key="${key}" min="${min}" max="${max}" step="${step}" value="${getPath(data.settings, key)}" aria-label="${esc(label)}">`;
+
+function hourLabel(h) {
+  if (h === 0) return 'Midnight';
+  return new Date(2000, 0, 1, h).toLocaleTimeString([], { hour: 'numeric' });
+}
+
+function openSettings() {
+  let previewCleanup = null;
+  let looks = null;
+  let areaIO = null;
+  const pg = sheet({
+    title: 'Settings',
+    kind: 'page',
+    body: '<div class="settings"></div>',
+    onClose: () => {
+      previewCleanup?.();
+      looks?.destroy();
+      areaIO?.disconnect();
+    },
+  });
+  const scroller = pg.body;
+  const root = pg.body.querySelector('.settings');
 
   function notifCtl() {
     if (!('Notification' in window)) return '<span class="muted">Not supported</span>';
@@ -3672,9 +3941,7 @@ function openSettings({ customize = false } = {}) {
       <nav class="set-nav" aria-label="Settings sections">${AREAS.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join('')}</nav>
 
       <div class="set-area area-looks" data-area="looks">
-        ${group('Templates', templatesHtml(), 'pad')}
-        <button class="btn block customize-toggle" aria-expanded="${customizeOpen}">${icon('palette')}<span>Customize further</span>${icon('chevronDown', 'chev')}</button>
-        <div class="customize"${customizeOpen ? '' : ' hidden'}>${customizeOpen ? customizeHtml() : ''}</div>
+        <section class="set-sec"><h3 class="group-title">Looks</h3><div class="group pad looks-panel"></div></section>
       </div>
 
       <div class="set-area" data-area="clock">
@@ -3728,7 +3995,7 @@ function openSettings({ customize = false } = {}) {
       <div class="set-area" data-area="data">
         ${group(
           'Tracking',
-          row('Daily goal (all)', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Auto adds up your category goals') +
+          row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
             row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
             row(
               'New day starts at',
@@ -3754,70 +4021,12 @@ function openSettings({ customize = false } = {}) {
       </div>`;
   }
 
-  /* ---------- live previews ---------- */
-
-  function mountPreview() {
-    const el = root.querySelector('.preview-clock');
-    let face = null;
-    const size = () => {
-      const W = Math.min(el.parentElement.clientWidth, 420);
-      const round = face && ['ring', 'analog'].includes(face.type);
-      el.style.width = `${W}px`;
-      el.style.height = `${Math.round(W * (round ? 0.62 : 0.44))}px`;
-      face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
-    };
-    const draw = (animate) => {
-      if (face?.type !== data.settings.face) {
-        face = makeFace(el, data.settings.face);
-        draw(false);
-        size();
-        return;
-      }
-      const ms = engine.displayMs();
-      const [, m, sec] = hms(ms, engine.isCountdown());
-      face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview', ms });
-    };
-    draw(false);
-    clearInterval(iv);
-    iv = setInterval(() => draw(true), 200);
-    offFit?.();
-    offFit = on('fit', () => {
-      size();
-      drawFaceTiles();
-    });
-  }
-
-  /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
-  function drawFaceTiles() {
-    tileRO?.disconnect();
-    const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
-    tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
-    for (const tile of root.querySelectorAll('.face-tile')) {
-      const el = tile.querySelector('.face-mini');
-      el._face = makeFace(el, tile.dataset.face);
-      el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
-      fitMini(el);
-      tileRO.observe(el);
-    }
-  }
-
-  function renderCustomize() {
-    const box = root.querySelector('.customize');
-    if (!customizeOpen) {
-      box.hidden = true;
-      return;
-    }
-    box.innerHTML = customizeHtml();
-    box.hidden = false;
-    drawFaceTiles();
-  }
-
   function render() {
     root.innerHTML = html();
-    mountPreview();
-    tplCleanup?.();
-    tplCleanup = drawTemplates(root.querySelector('.area-looks'));
-    if (customizeOpen) drawFaceTiles();
+    previewCleanup?.();
+    previewCleanup = mountPreview(root.querySelector('.preview-clock'));
+    looks?.destroy();
+    looks = looksPanel(root.querySelector('.looks-panel'), { onMore: () => openCustomize({ onClose: () => looks?.render() }) });
     watchAreas();
   }
 
@@ -3837,24 +4046,6 @@ function openSettings({ customize = false } = {}) {
     root.querySelectorAll('.set-area').forEach((a) => areaIO.observe(a));
   }
 
-  function refreshThemeUI() {
-    const s = data.settings;
-    const c = themeColors(s);
-    root.querySelectorAll('.theme-tile').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === s.theme)));
-    const custom = root.querySelector('.theme-tile[data-theme="custom"]');
-    if (custom) for (const [k, v] of Object.entries({ tb: s.custom.bg, tc: s.custom.card, td: s.custom.digit, ta: s.custom.accent })) custom.style.setProperty(`--${k}`, v);
-    root.querySelectorAll('input[data-color]').forEach((inp) => {
-      inp.value = c[inp.dataset.color];
-      inp.parentElement.style.setProperty('--c', c[inp.dataset.color]);
-    });
-  }
-
-  /** Any hand-made change to the look means it's no longer an untouched template. */
-  const lookChanged = () => {
-    data.settings.template = null;
-    markTemplates(root);
-  };
-
   const changed = () => {
     saveSoon();
     emit('settings');
@@ -3864,7 +4055,6 @@ function openSettings({ customize = false } = {}) {
     get: (k) => getPath(data.settings, k),
     set: (k, v) => {
       setPath(data.settings, k, v);
-      if (LOOK_KEYS.has(k)) lookChanged();
       if (k.startsWith('pomo.')) engine.syncIdle();
       if (k === 'sound') audio.playSound(v);
       changed();
@@ -3874,14 +4064,6 @@ function openSettings({ customize = false } = {}) {
   let volTimer = 0;
   root.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.matches('input[data-color]')) {
-      const s = data.settings;
-      s.custom = { ...themeColors(s), [t.dataset.color]: t.value };
-      s.theme = 'custom';
-      lookChanged();
-      refreshThemeUI();
-      changed();
-    }
     if (t.matches('[data-key="volume"]')) {
       clearTimeout(volTimer);
       volTimer = setTimeout(() => audio.playSound(data.settings.sound === 'none' ? 'chime' : data.settings.sound), 250);
@@ -3895,51 +4077,6 @@ function openSettings({ customize = false } = {}) {
       const area = root.querySelector(`[data-area="${jump.dataset.jump}"]`);
       area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
-    }
-    const tpl = e.target.closest('[data-tpl]');
-    if (tpl) {
-      haptic(8);
-      applyTemplate(tpl.dataset.tpl);
-      markTemplates(root);
-      if (customizeOpen) renderCustomize();
-      return;
-    }
-    const tog = e.target.closest('.customize-toggle');
-    if (tog) {
-      customizeOpen = !customizeOpen;
-      tog.setAttribute('aria-expanded', String(customizeOpen));
-      renderCustomize();
-      if (customizeOpen) setTimeout(() => tog.scrollIntoView({ behavior: 'smooth', block: 'start' }), 30);
-      return;
-    }
-    const th = e.target.closest('[data-theme]');
-    if (th) {
-      s.theme = th.dataset.theme;
-      lookChanged();
-      refreshThemeUI();
-      return changed();
-    }
-    const fc = e.target.closest('.face-tile');
-    if (fc) {
-      s.face = fc.dataset.face;
-      lookChanged();
-      root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
-      root.querySelector('.style-opts').innerHTML = styleOptionsHtml();
-      return changed();
-    }
-    const col = e.target.closest('[data-fcolor]');
-    if (col) {
-      s.faceColor = col.dataset.fcolor;
-      lookChanged();
-      col.parentElement.querySelectorAll('[data-fcolor]').forEach((b) => b.setAttribute('aria-pressed', String(b === col)));
-      return changed();
-    }
-    const ft = e.target.closest('[data-font]');
-    if (ft) {
-      s.font = ft.dataset.font;
-      lookChanged();
-      root.querySelectorAll('.font-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === ft)));
-      return changed();
     }
     if (e.target.closest('[data-test-sound]')) {
       audio.unlock();
@@ -4024,7 +4161,6 @@ function openSettings({ customize = false } = {}) {
   }
 
   render();
-  if (customize) setTimeout(() => root.querySelector('.customize-toggle')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 380);
 }
 return { openSettings };
 })();
@@ -4045,6 +4181,7 @@ const { mountStats } = __m.stats;
 const { mountHome } = __m.home;
 const { openSettings } = __m.settings;
 const { openLooks } = __m.looks;
+const { openCustomize } = __m.customize;
 const { initPWA, notify } = __m.pwa;
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
@@ -4412,7 +4549,7 @@ for (const b of $$('[data-open-looks]')) b.addEventListener('click', showLooks);
 
 function showLooks() {
   haptic(6);
-  openLooks({ onCustomize: () => openSettings({ customize: true }) });
+  openLooks({ onMore: () => openCustomize() });
 }
 
 document.addEventListener('keydown', (e) => {
@@ -4631,7 +4768,8 @@ if (DEMO && new URLSearchParams(location.search).has('scroll')) {
 if (DEMO && new URLSearchParams(location.search).has('tap')) setTimeout(() => isFull() && showOverlay(true), 5500);
 if (DEMO) {
   const q = new URLSearchParams(location.search);
-  if (q.has('settings')) setTimeout(() => openSettings({ customize: q.has('customize') }), 300);
+  if (q.has('settings')) setTimeout(() => openSettings(), 300);
+  if (q.has('customize')) setTimeout(() => openCustomize(), 300);
   if (q.has('looks')) setTimeout(showLooks, 300);
 }
 setInterval(frame, 150);

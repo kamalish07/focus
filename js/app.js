@@ -12,6 +12,7 @@ import { mountStats } from './stats.js';
 import { mountHome } from './home.js';
 import { openSettings } from './settings.js';
 import { openLooks } from './looks.js';
+import { openCustomize } from './customize.js';
 import { initPWA, notify } from './pwa.js';
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
@@ -379,7 +380,7 @@ for (const b of $$('[data-open-looks]')) b.addEventListener('click', showLooks);
 
 function showLooks() {
   haptic(6);
-  openLooks({ onCustomize: () => openSettings({ customize: true }) });
+  openLooks({ onMore: () => openCustomize() });
 }
 
 document.addEventListener('keydown', (e) => {
@@ -598,7 +599,8 @@ if (DEMO && new URLSearchParams(location.search).has('scroll')) {
 if (DEMO && new URLSearchParams(location.search).has('tap')) setTimeout(() => isFull() && showOverlay(true), 5500);
 if (DEMO) {
   const q = new URLSearchParams(location.search);
-  if (q.has('settings')) setTimeout(() => openSettings({ customize: q.has('customize') }), 300);
+  if (q.has('settings')) setTimeout(() => openSettings(), 300);
+  if (q.has('customize')) setTimeout(() => openCustomize(), 300);
   if (q.has('looks')) setTimeout(showLooks, 300);
 }
 setInterval(frame, 150);

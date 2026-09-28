@@ -12,13 +12,15 @@ like a normal app, works offline, and keeps all data on your device.
 
 - **Bottom tab bar:** Home · Stopwatch · Timer · Pomodoro · Stats. It becomes a side rail when
   the phone is sideways. Each mode keeps its own clock, and starting one pauses any other.
-- **Home:** a big flip clock with the current time, the clock you're running, today's time
-  by category (with optional goal rings), a week chart, a consistency heatmap and recent sessions.
+- **Home:** the current time fills the screen. Scroll down and the details rise in: today's
+  time by category (with an optional daily goal), a week chart, a consistency heatmap and
+  recent sessions.
 - **Nine clock styles:** Flip (split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix,
   Nixie tubes, Ring and Analog. Vertical on phones, horizontal in landscape.
-- **16 ready-made looks** (the palette button on the clock or Home), plus *Customize further*:
-  per-style colour, glow, unlit segments, tick marks, flip speed, card depth, aurora palette,
-  theme, colours, font, digit size and a background glow or gradient.
+- **16 ready-made looks:** the palette button shows four favourites and the colour theme.
+  *More looks* opens every template plus per-style colour, glow, unlit segments, tick marks,
+  flip speed, card depth, aurora palette, your own colours, font, digit size and a background
+  glow or gradient.
 - **Full-screen clock:** while a clock runs, it fills the screen. Tap for floating controls, like a
   video player.
 - **Stopwatch, Timer and Pomodoro** modes. Time is measured from timestamps, so it stays

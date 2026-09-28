@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS = {
   sound: 'chime',
   volume: 0.8,
   vibrate: true,
-  goal: 0, // minutes per day across all categories; 0 = sum of category goals
+  goal: 0, // daily goal in minutes, all categories together; 0 = no goal
   weekStart: 1,
   dayStart: 0, // hour a new "day" begins, for night owls
   minSave: 30, // seconds; shorter sessions are not kept
@@ -69,7 +69,7 @@ export function freshRunner(mode = 'stopwatch', s = DEFAULT_SETTINGS) {
 
 function defaults() {
   return {
-    v: 4,
+    v: 5,
     settings: structuredClone(DEFAULT_SETTINGS),
     cats: [{ id: 'study', name: 'Study', color: PALETTE[0], goal: 0 }], // goals are optional
     sessions: [],
@@ -85,6 +85,8 @@ function normalize(d) {
   if ((d.v || 1) < 3 && settings.format === 'hms') settings.format = 'auto';
   // Version 4: goals are opt-in. Clear the 3-hour goal that used to be set by default (only if untouched).
   if ((d.v || 1) < 4) for (const c of d.cats || []) if (c && c.id === 'study' && c.goal === 180) c.goal = 0;
+  // Version 5: the daily goal is one explicit total. Keep what the category goals used to add up to.
+  if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id) : [];
@@ -112,7 +114,7 @@ function normalize(d) {
       s.run = null;
     }
   }
-  return { v: 4, settings, cats: cats.length ? cats : def.cats, sessions, runners };
+  return { v: 5, settings, cats: cats.length ? cats : def.cats, sessions, runners };
 }
 
 /** `?demo` in the URL shows sample data (used for store screenshots) and never saves anything. */
@@ -130,6 +132,7 @@ function demoData() {
     { id: 'read', name: 'Reading', color: PALETTE[2], goal: 30 },
   ];
   if (noGoal) for (const c of d.cats) c.goal = 0;
+  else d.settings.goal = 240;
   let seed = 7;
   const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
   const today = new Date();
@@ -220,10 +223,10 @@ export function currentCat() {
   return c;
 }
 
-/** Daily goal in ms for a category, or for everything when catId is null. */
+/** Daily goal in ms for a category, or the overall daily goal (all categories) when catId is null. 0 = no goal. */
 export function goalFor(catId) {
   if (catId) return (catById(catId).goal || 0) * MIN;
-  return (data.settings.goal || data.cats.reduce((a, c) => a + (c.goal || 0), 0)) * MIN;
+  return (data.settings.goal || 0) * MIN;
 }
 
 export function nextColor() {

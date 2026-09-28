@@ -129,6 +129,47 @@ function editPomodoro() {
   });
 }
 
+/* ---------- daily goal ---------- */
+
+/** One goal for the whole day: the total across every category. */
+export function openGoalSheet(onDone) {
+  const cur = data.settings.goal || 0;
+  const presets = [30, 60, 120, 180, 240, 360];
+  const sh = sheet({
+    title: 'Daily goal',
+    body: `<p class="hint">How long you want to focus each day, all categories together.</p>
+      <div class="wheels"></div>
+      <div class="chips center">${presets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('')}</div>
+      ${actions(cur ? 'Save' : 'Set goal', cur ? '<button class="btn" data-clear>No goal</button>' : '')}`,
+  });
+  const box = sh.body.querySelector('.wheels');
+  const wh = wheel({ max: 16, label: 'h' });
+  const wm = wheel({ max: 55, step: 5, label: 'm' });
+  box.append(wh, wm);
+  const setTo = (m, smooth) => {
+    wh.set(Math.floor(m / 60), smooth);
+    wm.set(Math.round((m % 60) / 5) * 5, smooth);
+  };
+  setTo(cur || 120);
+  const done = (v) => {
+    data.settings.goal = v;
+    save();
+    sh.close();
+    onDone?.();
+    toast(v ? `Daily goal: ${fmtDur(v * MIN)}` : 'Daily goal removed');
+  };
+  sh.body.addEventListener('click', (e) => {
+    const set = e.target.closest('[data-set]');
+    if (set) {
+      setTo(Number(set.dataset.set), true);
+      haptic();
+      return;
+    }
+    if (e.target.closest('[data-clear]')) return done(0);
+    if (e.target.closest('[data-save]')) done(wh.get() * 60 + wm.get());
+  });
+}
+
 /* ---------- categories ---------- */
 
 export function openCategories() {
@@ -183,7 +224,7 @@ export function openCategoryEditor(cat, onDone) {
         ${PALETTE.map((col) => `<button class="swatch" data-color="${col}" style="--c:${col}" aria-label="Colour ${col}" aria-pressed="${col === c.color}"></button>`).join('')}
         <label class="swatch custom" style="--c:${esc(c.color)}" aria-label="Custom colour"><input type="color" value="${esc(c.color)}"></label>
       </div></div>
-      <div class="field"><span class="field-label">Daily goal</span><div class="wheels"></div><p class="hint small">Leave at 0h 00m for no goal.</p></div>
+      <div class="field"><span class="field-label">Goal for this category</span><div class="wheels"></div><p class="hint small">Optional. Leave at 0h 00m for none. Your overall daily goal is set on Home.</p></div>
       ${actions('Save', canDelete ? `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>` : '')}`,
   });
   const box = sh.body.querySelector('.wheels');
