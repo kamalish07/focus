@@ -355,5 +355,15 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     }
   });
 
+  // Keep the clock exactly one screen tall, even when the space changes without a resize event
+  // (fonts arriving, the browser's address bar sliding away).
+  let lastH = 0;
+  new ResizeObserver(() => {
+    if (root.clientHeight && root.clientHeight !== lastH) {
+      lastH = root.clientHeight;
+      fit();
+    }
+  }).observe(root);
+
   return { tick, refresh, fit };
 }
