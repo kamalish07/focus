@@ -114,11 +114,9 @@ export function mountStats(root, { visible = () => true } = {}) {
       const v = sum(pickCats(dayData(k).cats));
       if (v > best.ms) best = { k, ms: v };
     }
-    const todayCats = pickCats(dayData(t).cats);
-    const todayTotal = sum(todayCats);
-    const goal = goalFor(st.cat);
-    const pct = goal ? Math.min(100, (todayTotal / goal) * 100) : 0;
     const days = streak(st.cat);
+    const current = keys.includes(t);
+    const period = current ? { week: 'This week', month: 'This month', year: 'This year' }[st.range] : 'Total';
     const rangeTotals = {};
     for (const b of st.buckets) for (const [id, v] of Object.entries(b.cats)) rangeTotals[id] = (rangeTotals[id] || 0) + v;
     const order = catOrder(Object.keys(rangeTotals)).filter((id) => rangeTotals[id] > 0);
@@ -144,21 +142,14 @@ export function mountStats(root, { visible = () => true } = {}) {
         </div>
       </div>
       <section class="hero-card g-m">
-        <div class="hero-label">Today${st.cat ? ` · ${esc(catById(st.cat).name)}` : ''}</div>
-        <div class="hero">${fmtDur(todayTotal)}</div>
-        ${
-          goal
-            ? `<div class="meter" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
-               <div class="hero-sub">${pct >= 100 ? 'Goal reached, nice work!' : `${Math.round(pct)}% of your ${fmtDur(goal)} goal`}</div>`
-            : '<div class="hero-sub">No daily goal set</div>'
-        }
+        <div class="hero-label">${period}${st.cat ? ` · ${esc(catById(st.cat).name)}` : ''}</div>
+        <div class="hero">${fmtDur(total)}</div>
+        <div class="hero-stats">
+          <div><span>Daily average</span><b>${fmtDur(avg)}</b></div>
+          <div><span>Best day</span><b>${best.ms ? fmtDur(best.ms) : '0m'}</b>${best.k ? `<small>${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</small>` : ''}</div>
+          <div><span>Streak</span><b>${days} ${days === 1 ? 'day' : 'days'}</b></div>
+        </div>
       </section>
-      <div class="tiles g-m">
-        <div class="tile"><div class="tile-label">Total</div><div class="tile-value">${fmtDur(total)}</div></div>
-        <div class="tile"><div class="tile-label">Daily average</div><div class="tile-value">${fmtDur(avg)}</div></div>
-        <div class="tile"><div class="tile-label">Best day</div><div class="tile-value">${best.ms ? fmtDur(best.ms) : '0m'}</div>${best.k ? `<div class="tile-sub">${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</div>` : ''}</div>
-        <div class="tile"><div class="tile-label">Streak</div><div class="tile-value">${days} ${days === 1 ? 'day' : 'days'}</div></div>
-      </div>
       <section class="chart-card">
         <div class="chart"></div>
         ${order.length > 1 ? `<div class="legend">${order.map((id) => `<span><span class="dot" style="--c:${esc(color(id))}"></span>${esc(catById(id).name)}</span>`).join('')}</div>` : ''}

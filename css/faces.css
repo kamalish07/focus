@@ -232,16 +232,20 @@
 .view-home { scroll-snap-type: y proximity; }
 .home-hero, .home-bento { scroll-snap-align: start; scroll-margin-top: calc(env(safe-area-inset-top) + 14px); }
 .hero-stage { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.home-clock-sub { color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .14em; }
 .home-clock-sub:empty { display: none; }
 .home-hero .live-slot { flex: none; width: min(100%, 460px); margin: 0 auto; }
+/* A quiet, still hint that there's more below. */
 .hero-cue {
   flex: none; align-self: center;
   display: flex; flex-direction: column; align-items: center;
-  padding: 6px 20px 2px;
-  color: var(--muted); font-size: 13.5px; font-weight: 600;
+  padding: 4px 20px 0;
+  color: var(--muted); opacity: .5;
+  font-size: 12px; font-weight: 500;
+  transition: opacity .2s;
 }
-.hero-cue svg.i { width: 22px; height: 22px; animation: cueBob 2.6s ease-in-out infinite; }
-@keyframes cueBob { 0%, 100% { transform: none; opacity: .45; } 50% { transform: translateY(4px); opacity: 1; } }
+.hero-cue:hover { opacity: .85; }
+.hero-cue svg.i { width: 16px; height: 16px; }
 .home-bento { margin-top: 22px; }
 @media (prefers-reduced-motion: no-preference) {
   @supports (animation-timeline: view()) {
@@ -274,3 +278,22 @@ body:has(.app.landscape) .toast { bottom: auto; }
 @media (prefers-reduced-motion: reduce) {
   .au-bg i, .mn.aurora .mn-g { animation: none !important; }
 }
+
+/* ============ neat pass ============ */
+/* The tab bar blends into the page instead of sitting behind a hard line. */
+.tabbar { border-top: 0; }
+.landscape .tabbar { border-right: 0; }
+
+/* Stats: one summary card for the period */
+.hero-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 4px; padding-top: 14px; border-top: 1px solid var(--line); }
+.hero-stats div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hero-stats span { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-stats b { font-size: 17px; font-weight: 700; white-space: nowrap; }
+.hero-stats small { color: var(--muted); font-size: 11.5px; }
+
+/* Sheet buttons stay in view even when the sheet has to scroll. */
+.sheet .sheet-actions { position: sticky; bottom: -22px; z-index: 2; margin: 20px -18px -22px; padding: 12px 18px 18px; background: var(--sheet); }
+.hint.center { text-align: center; }
+.hint svg.i.inline { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; }
+/* On Home the hands already tell the time, so the analog dial drops its digital readout. */
+.home-clock .an-digital { display: none; }

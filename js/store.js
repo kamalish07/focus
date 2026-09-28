@@ -1,4 +1,4 @@
-import { PALETTE } from './config.js';
+import { PALETTE, TEMPLATES, LOOK_DEFAULTS } from './config.js';
 import { MIN, pad } from './util.js';
 
 const KEY = 'focus.v1';
@@ -125,6 +125,8 @@ function demoData() {
   Object.assign(d.settings, { seenTip: true, askedNotif: true });
   const face = new URLSearchParams(location.search).get('face');
   if (face) d.settings.face = face;
+  const tpl = TEMPLATES.find((t) => t.id === new URLSearchParams(location.search).get('tpl'));
+  if (tpl) Object.assign(d.settings, LOOK_DEFAULTS, tpl.look, { template: tpl.id });
   const noGoal = new URLSearchParams(location.search).has('nogoal');
   d.cats = [
     { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },

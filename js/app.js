@@ -134,7 +134,7 @@ function applyAll() {
 /** Tab changes cross-fade where the browser supports view transitions. */
 function showTab(t) {
   const animate = started && t !== tab && document.startViewTransition && !reduceMotion.matches && !document.hidden;
-  if (animate) document.startViewTransition(() => swapTab(t));
+  if (animate) document.startViewTransition(() => swapTab(t)).ready.catch(() => {}); // a skipped fade is fine
   else swapTab(t);
 }
 

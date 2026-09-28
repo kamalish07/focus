@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -186,7 +186,7 @@ return { SEC, MIN, HOUR, $, $$, pad, clamp, uid, esc, hms, fmtDur, fmtTime, lumi
 
 // ---------- store.js ----------
 __m.store = (() => {
-const { PALETTE } = __m.config;
+const { PALETTE, TEMPLATES, LOOK_DEFAULTS } = __m.config;
 const { MIN, pad } = __m.util;
 
 const KEY = 'focus.v1';
@@ -313,6 +313,8 @@ function demoData() {
   Object.assign(d.settings, { seenTip: true, askedNotif: true });
   const face = new URLSearchParams(location.search).get('face');
   if (face) d.settings.face = face;
+  const tpl = TEMPLATES.find((t) => t.id === new URLSearchParams(location.search).get('tpl'));
+  if (tpl) Object.assign(d.settings, LOOK_DEFAULTS, tpl.look, { template: tpl.id });
   const noGoal = new URLSearchParams(location.search).has('nogoal');
   d.cats = [
     { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
@@ -2445,7 +2447,8 @@ function openGoalSheet(onDone) {
 function openCategories() {
   const sh = sheet({
     title: 'Categories',
-    body: `<div class="cat-list"></div><button class="btn block ghost" data-new>${icon('plus')}<span>New category</span></button>`,
+    body: `<div class="cat-list"></div><button class="btn block ghost" data-new>${icon('plus')}<span>New category</span></button>
+      <p class="hint small center">Tap ${icon('edit', 'inline')} to rename, recolour or delete a category.</p>`,
   });
   const list = sh.body.querySelector('.cat-list');
   const draw = () => {
@@ -2494,15 +2497,14 @@ function openCategoryEditor(cat, onDone) {
         ${PALETTE.map((col) => `<button class="swatch" data-color="${col}" style="--c:${col}" aria-label="Colour ${col}" aria-pressed="${col === c.color}"></button>`).join('')}
         <label class="swatch custom" style="--c:${esc(c.color)}" aria-label="Custom colour"><input type="color" value="${esc(c.color)}"></label>
       </div></div>
-      <div class="field"><span class="field-label">Goal for this category</span><div class="wheels"></div><p class="hint small">Optional. Leave at 0h 00m for none. Your overall daily goal is set on Home.</p></div>
+      <div class="group">
+        <div class="row"><div class="row-label">Daily goal<small>Optional, just for this category</small></div>
+          <div class="row-ctl">${stepperEl('goal', c.goal, { min: 0, max: 960, step: 15, fmt: 'goal' }, 'category goal')}</div></div>
+      </div>
+      ${!isNew && !canDelete ? '<p class="hint small">This is your only category, so it can’t be deleted. You can rename it instead.</p>' : ''}
       ${actions('Save', canDelete ? `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>` : '')}`,
   });
-  const box = sh.body.querySelector('.wheels');
-  const wh = wheel({ max: 16, label: 'h' });
-  const wm = wheel({ max: 55, step: 5, label: 'm' });
-  box.append(wh, wm);
-  wh.set(Math.floor(c.goal / 60));
-  wm.set(Math.round((c.goal % 60) / 5) * 5);
+  bindControls(sh.body, { get: () => c.goal, set: (k, v) => (c.goal = v) });
   const custom = sh.body.querySelector('.swatch.custom');
   const pickColor = (col) => {
     c.color = col;
@@ -2519,7 +2521,6 @@ function openCategoryEditor(cat, onDone) {
     if (sw) return pickColor(sw.dataset.color);
     if (e.target.closest('[data-save]')) {
       c.name = sh.body.querySelector('[data-name]').value.trim() || 'Untitled';
-      c.goal = wh.get() * 60 + wm.get();
       if (isNew) data.cats.push(c);
       else Object.assign(data.cats.find((x) => x.id === c.id), c);
       save();
@@ -2775,11 +2776,9 @@ function mountStats(root, { visible = () => true } = {}) {
       const v = sum(pickCats(dayData(k).cats));
       if (v > best.ms) best = { k, ms: v };
     }
-    const todayCats = pickCats(dayData(t).cats);
-    const todayTotal = sum(todayCats);
-    const goal = goalFor(st.cat);
-    const pct = goal ? Math.min(100, (todayTotal / goal) * 100) : 0;
     const days = streak(st.cat);
+    const current = keys.includes(t);
+    const period = current ? { week: 'This week', month: 'This month', year: 'This year' }[st.range] : 'Total';
     const rangeTotals = {};
     for (const b of st.buckets) for (const [id, v] of Object.entries(b.cats)) rangeTotals[id] = (rangeTotals[id] || 0) + v;
     const order = catOrder(Object.keys(rangeTotals)).filter((id) => rangeTotals[id] > 0);
@@ -2805,21 +2804,14 @@ function mountStats(root, { visible = () => true } = {}) {
         </div>
       </div>
       <section class="hero-card g-m">
-        <div class="hero-label">Today${st.cat ? ` · ${esc(catById(st.cat).name)}` : ''}</div>
-        <div class="hero">${fmtDur(todayTotal)}</div>
-        ${
-          goal
-            ? `<div class="meter" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
-               <div class="hero-sub">${pct >= 100 ? 'Goal reached, nice work!' : `${Math.round(pct)}% of your ${fmtDur(goal)} goal`}</div>`
-            : '<div class="hero-sub">No daily goal set</div>'
-        }
+        <div class="hero-label">${period}${st.cat ? ` · ${esc(catById(st.cat).name)}` : ''}</div>
+        <div class="hero">${fmtDur(total)}</div>
+        <div class="hero-stats">
+          <div><span>Daily average</span><b>${fmtDur(avg)}</b></div>
+          <div><span>Best day</span><b>${best.ms ? fmtDur(best.ms) : '0m'}</b>${best.k ? `<small>${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</small>` : ''}</div>
+          <div><span>Streak</span><b>${days} ${days === 1 ? 'day' : 'days'}</b></div>
+        </div>
       </section>
-      <div class="tiles g-m">
-        <div class="tile"><div class="tile-label">Total</div><div class="tile-value">${fmtDur(total)}</div></div>
-        <div class="tile"><div class="tile-label">Daily average</div><div class="tile-value">${fmtDur(avg)}</div></div>
-        <div class="tile"><div class="tile-label">Best day</div><div class="tile-value">${best.ms ? fmtDur(best.ms) : '0m'}</div>${best.k ? `<div class="tile-sub">${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</div>` : ''}</div>
-        <div class="tile"><div class="tile-label">Streak</div><div class="tile-value">${days} ${days === 1 ? 'day' : 'days'}</div></div>
-      </div>
       <section class="chart-card">
         <div class="chart"></div>
         ${order.length > 1 ? `<div class="legend">${order.map((id) => `<span><span class="dot" style="--c:${esc(color(id))}"></span>${esc(catById(id).name)}</span>`).join('')}</div>` : ''}
@@ -3119,7 +3111,8 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     root.querySelector('.greet').textContent = greeting(d.getHours());
     root.querySelector('.home-date').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
     const today = dayData(dayKey(now), now).total;
-    sub.innerHTML = is24() ? '' : `<span class="ampm">${d.getHours() < 12 ? 'AM' : 'PM'}</span>`;
+    // Ring and analog faces show AM/PM on the dial already.
+    sub.textContent = is24() || ['ring', 'analog'].includes(face.type) ? '' : d.getHours() < 12 ? 'AM' : 'PM';
     cue.textContent = today ? `${fmtDur(today)} focused today` : 'Your day';
   }
 
@@ -3346,7 +3339,10 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
   }
 
   function tick(now = Date.now(), animate = true) {
-    if (face.type !== data.settings.face) face = makeFace(clockEl, data.settings.face);
+    if (face.type !== data.settings.face) {
+      face = makeFace(clockEl, data.settings.face);
+      header(now);
+    }
     const ds = digits(now);
     const countChanged = ds.length !== face.count;
     const d = new Date(now);
@@ -3878,6 +3874,7 @@ const { SOUNDS, APP_VERSION } = __m.config;
 const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } = __m.ui;
 const { looksPanel, mountPreview } = __m.looks;
 const { openCustomize } = __m.customize;
+const { openCategories } = __m.sheets;
 const engine = __m.engine;
 const audio = __m.audio;
 const pwa = __m.pwa;
@@ -4005,7 +4002,8 @@ function openSettings() {
       <div class="set-area" data-area="data">
         ${group(
           'Tracking',
-          row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
+          row('Categories', '<button class="btn sm" data-cats>Edit</button>', 'Add, rename, recolour or delete') +
+            row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
             row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
             row(
               'New day starts at',
@@ -4088,6 +4086,7 @@ function openSettings() {
       area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
+    if (e.target.closest('[data-cats]')) return openCategories();
     if (e.target.closest('[data-test-sound]')) {
       audio.unlock();
       return audio.playSound(s.sound === 'none' ? 'chime' : s.sound);
@@ -4313,7 +4312,7 @@ function applyAll() {
 /** Tab changes cross-fade where the browser supports view transitions. */
 function showTab(t) {
   const animate = started && t !== tab && document.startViewTransition && !reduceMotion.matches && !document.hidden;
-  if (animate) document.startViewTransition(() => swapTab(t));
+  if (animate) document.startViewTransition(() => swapTab(t)).ready.catch(() => {}); // a skipped fade is fine
   else swapTab(t);
 }
 

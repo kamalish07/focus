@@ -86,7 +86,8 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     root.querySelector('.greet').textContent = greeting(d.getHours());
     root.querySelector('.home-date').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
     const today = dayData(dayKey(now), now).total;
-    sub.innerHTML = is24() ? '' : `<span class="ampm">${d.getHours() < 12 ? 'AM' : 'PM'}</span>`;
+    // Ring and analog faces show AM/PM on the dial already.
+    sub.textContent = is24() || ['ring', 'analog'].includes(face.type) ? '' : d.getHours() < 12 ? 'AM' : 'PM';
     cue.textContent = today ? `${fmtDur(today)} focused today` : 'Your day';
   }
 
@@ -313,7 +314,10 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
   }
 
   function tick(now = Date.now(), animate = true) {
-    if (face.type !== data.settings.face) face = makeFace(clockEl, data.settings.face);
+    if (face.type !== data.settings.face) {
+      face = makeFace(clockEl, data.settings.face);
+      header(now);
+    }
     const ds = digits(now);
     const countChanged = ds.length !== face.count;
     const d = new Date(now);

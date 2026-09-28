@@ -175,7 +175,8 @@ export function openGoalSheet(onDone) {
 export function openCategories() {
   const sh = sheet({
     title: 'Categories',
-    body: `<div class="cat-list"></div><button class="btn block ghost" data-new>${icon('plus')}<span>New category</span></button>`,
+    body: `<div class="cat-list"></div><button class="btn block ghost" data-new>${icon('plus')}<span>New category</span></button>
+      <p class="hint small center">Tap ${icon('edit', 'inline')} to rename, recolour or delete a category.</p>`,
   });
   const list = sh.body.querySelector('.cat-list');
   const draw = () => {
@@ -224,15 +225,14 @@ export function openCategoryEditor(cat, onDone) {
         ${PALETTE.map((col) => `<button class="swatch" data-color="${col}" style="--c:${col}" aria-label="Colour ${col}" aria-pressed="${col === c.color}"></button>`).join('')}
         <label class="swatch custom" style="--c:${esc(c.color)}" aria-label="Custom colour"><input type="color" value="${esc(c.color)}"></label>
       </div></div>
-      <div class="field"><span class="field-label">Goal for this category</span><div class="wheels"></div><p class="hint small">Optional. Leave at 0h 00m for none. Your overall daily goal is set on Home.</p></div>
+      <div class="group">
+        <div class="row"><div class="row-label">Daily goal<small>Optional, just for this category</small></div>
+          <div class="row-ctl">${stepperEl('goal', c.goal, { min: 0, max: 960, step: 15, fmt: 'goal' }, 'category goal')}</div></div>
+      </div>
+      ${!isNew && !canDelete ? '<p class="hint small">This is your only category, so it can’t be deleted. You can rename it instead.</p>' : ''}
       ${actions('Save', canDelete ? `<button class="btn danger" data-del>${icon('trash')}<span>Delete</span></button>` : '')}`,
   });
-  const box = sh.body.querySelector('.wheels');
-  const wh = wheel({ max: 16, label: 'h' });
-  const wm = wheel({ max: 55, step: 5, label: 'm' });
-  box.append(wh, wm);
-  wh.set(Math.floor(c.goal / 60));
-  wm.set(Math.round((c.goal % 60) / 5) * 5);
+  bindControls(sh.body, { get: () => c.goal, set: (k, v) => (c.goal = v) });
   const custom = sh.body.querySelector('.swatch.custom');
   const pickColor = (col) => {
     c.color = col;
@@ -249,7 +249,6 @@ export function openCategoryEditor(cat, onDone) {
     if (sw) return pickColor(sw.dataset.color);
     if (e.target.closest('[data-save]')) {
       c.name = sh.body.querySelector('[data-name]').value.trim() || 'Untitled';
-      c.goal = wh.get() * 60 + wm.get();
       if (isNew) data.cats.push(c);
       else Object.assign(data.cats.find((x) => x.id === c.id), c);
       save();

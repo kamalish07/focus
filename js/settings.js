@@ -3,6 +3,7 @@ import { SOUNDS, APP_VERSION } from './config.js';
 import { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } from './ui.js';
 import { looksPanel, mountPreview } from './looks.js';
 import { openCustomize } from './customize.js';
+import { openCategories } from './sheets.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as pwa from './pwa.js';
@@ -130,7 +131,8 @@ export function openSettings() {
       <div class="set-area" data-area="data">
         ${group(
           'Tracking',
-          row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
+          row('Categories', '<button class="btn sm" data-cats>Edit</button>', 'Add, rename, recolour or delete') +
+            row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
             row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
             row(
               'New day starts at',
@@ -213,6 +215,7 @@ export function openSettings() {
       area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
+    if (e.target.closest('[data-cats]')) return openCategories();
     if (e.target.closest('[data-test-sound]')) {
       audio.unlock();
       return audio.playSound(s.sound === 'none' ? 'chime' : s.sound);
