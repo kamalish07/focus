@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Focus</title>
+  <meta name="description" content="A flip-clock stopwatch, timer and Pomodoro that tracks how long you study every day.">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Focus">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link id="font-css" rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@700&family=Bebas+Neue&family=DM+Serif+Display&family=Fredoka:wght@600&family=JetBrains+Mono:wght@700&family=Orbitron:wght@700&family=Oswald:wght@600&family=Rubik:wght@600&family=VT323&display=swap">
+  <link rel="stylesheet" href="css/styles.css">
+  <script>
+    // Paint the saved background before anything else loads, so there's no flash.
+    try { var bg = localStorage.getItem('focus.bg'); if (bg) document.documentElement.style.background = bg; } catch (e) {}
+  </script>
+  <!-- Plain (non-module) bundle so the app also opens straight from disk. Rebuild with: node tools/build.mjs -->
+  <script defer src="js/app.bundle.js"></script>
+</head>
+<body>
+  <div id="app" class="app layout-col">
+    <div class="views">
+      <!-- Home: current time + dashboard (filled in by js/home.js) -->
+      <section class="view view-home" aria-label="Home"></section>
+
+      <!-- Stopwatch / Timer / Pomodoro share this view -->
+      <section class="view view-clock" aria-label="Clock" hidden>
+        <header class="topbar chrome">
+          <span></span>
+          <button id="btn-cat" class="pill" aria-label="Choose category">
+            <span class="dot"></span><span class="pill-name">Study</span><span data-icon="chevronRight"></span>
+          </button>
+          <button class="icon-btn" data-open-settings data-icon="settings" aria-label="Settings" title="Settings"></button>
+        </header>
+        <main class="stage">
+          <div id="clock" class="clock" role="timer" aria-label="Tap to edit the time" title="Tap to edit"></div>
+          <div class="controls">
+            <button id="btn-reset" class="ctl" data-icon="reset" aria-label="Reset" title="Reset (R)"></button>
+            <button id="btn-play" class="ctl ctl-play" aria-label="Start" title="Start / pause (Space)"></button>
+            <button id="btn-skip" class="ctl" data-icon="skip" aria-label="Skip to next phase" title="Skip phase" hidden></button>
+            <button id="btn-edit" class="ctl" data-icon="edit" aria-label="Edit time" title="Edit time (E)"></button>
+          </div>
+        </main>
+        <footer class="info chrome">
+          <div class="info-row"><span id="info-left"></span><span id="info-right"></span></div>
+          <div class="progress" id="progress"><i></i></div>
+        </footer>
+      </section>
+
+      <section class="view view-stats" aria-label="Statistics" hidden>
+        <header class="view-head">
+          <h1>Statistics</h1>
+          <button class="icon-btn" data-open-settings data-icon="settings" aria-label="Settings" title="Settings"></button>
+        </header>
+        <div class="stats"></div>
+      </section>
+    </div>
+
+    <nav class="tabbar chrome" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" data-tab="home"><span class="tab-ic" data-icon="home"></span><span class="tab-label">Home</span></button>
+      <button class="tab" role="tab" data-tab="stopwatch"><span class="tab-ic" data-icon="stopwatch"></span><span class="tab-label">Stopwatch</span></button>
+      <button class="tab" role="tab" data-tab="timer"><span class="tab-ic" data-icon="timer"></span><span class="tab-label">Timer</span></button>
+      <button class="tab" role="tab" data-tab="pomodoro"><span class="tab-ic" data-icon="pomodoro"></span><span class="tab-label">Pomodoro</span></button>
+      <button class="tab" role="tab" data-tab="stats"><span class="tab-ic" data-icon="stats"></span><span class="tab-label">Stats</span></button>
+    </nav>
+  </div>
+
+  <div id="overlays"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript><p style="color:#aaa;font-family:sans-serif;padding:24px">Focus needs JavaScript to run.</p></noscript>
+</body>
+</html>
