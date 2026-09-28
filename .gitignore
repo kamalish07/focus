@@ -1,1 +1,7 @@
 .claude/
+
+# Android signing keys and build outputs never go in this public repo
+*.keystore
+*.jks
+*.aab
+*.apk

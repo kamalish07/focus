@@ -19,13 +19,16 @@ Focus turns your phone into a beautiful split-flap clock that keeps you studying
 Nine clock styles: Flip (a real split-flap animation), Minimal, Neon, Aurora, LED, Dot matrix, Nixie tubes, Ring and a classic Analog dial. Start from 16 ready-made looks like Retro Nixie, Neon Night, Bedside LED or Wristwatch, then customise colours, glow, fonts and more. After a few seconds the buttons slide away and the clock covers the whole screen, upright or sideways. Tap anywhere for floating controls.
 
 📊 SEE YOUR PROGRESS
-• Today's time by subject, with optional daily goals and progress rings
-• Streaks, this week vs last week, monthly totals and daily average
-• A consistency heatmap of the last six months
-• Week, month and year charts, plus a full session log you can edit
+• Today's time by subject, with an optional daily goal
+• Week, month and year totals, daily average, best day and streak
+• A consistency heatmap of the last few months
+• Charts plus a full session log you can edit
+
+🏷 SUBJECTS, OR NONE AT ALL
+Track time by subject (Study, Math, Reading…) with colours and goals, or pick No category and simply time it.
 
 🎨 MAKE IT YOURS
-10 colour themes plus custom colours, 10 digit fonts, digit size, corner roundness, flip sound, hours/minutes/seconds display and a 12/24-hour home clock.
+10 colour themes plus custom colours, 10 digit fonts, digit size, corner roundness and flip sound. Give the Home clock a look of its own, separate from your stopwatch and timers.
 
 🌙 WORKS WITH THE SCREEN OFF
 Timers keep running and alarms ring on time, with play/pause on your lock screen. Optional brown, pink or white focus noise.
@@ -44,7 +47,7 @@ No account, no ads, no tracking. Everything stays on your phone. Back up or expo
 |---|---|
 | App icon (512 × 512) | `play-icon-512.png` |
 | Feature graphic (1024 × 500) | `feature-graphic-1024x500.png` |
-| Phone screenshots (1080 × 1920) | `screenshot-1-home.png`, `screenshot-2-fullscreen.png`, `screenshot-3-dashboard.png`, `screenshot-4-stats.png`, `screenshot-5-looks.png` |
+| Phone screenshots (1080 × 1920) | `screenshot-1-home.png`, `screenshot-2-fullscreen.png`, `screenshot-3-dashboard.png`, `screenshot-4-stats.png`, `screenshot-5-looks.png`, `screenshot-6-home-look.png` |
 | Tablet / Chromebook screenshot | `screenshot-wide.png` |
 
 ## App content answers

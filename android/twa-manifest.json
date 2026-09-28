@@ -1,0 +1,72 @@
+{
+  "packageId": "io.github.kamalish07.focus",
+  "host": "kamalish07.github.io",
+  "name": "Focus: Flip Clock Study Timer",
+  "launcherName": "Focus",
+  "display": "standalone",
+  "themeColor": "#000000",
+  "themeColorDark": "#000000",
+  "navigationColor": "#000000",
+  "navigationColorDark": "#000000",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#000000",
+  "enableNotifications": true,
+  "startUrl": "/focus/",
+  "iconUrl": "https://kamalish07.github.io/focus/icons/icon-512.png",
+  "maskableIconUrl": "https://kamalish07.github.io/focus/icons/maskable-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "C:\\Users\\kamal\\FocusAndroid\\focus-upload.keystore",
+    "alias": "focus"
+  },
+  "appVersionName": "1.10.0",
+  "appVersionCode": 1,
+  "shortcuts": [
+    {
+      "name": "Stopwatch",
+      "shortName": "Stopwatch",
+      "url": "https://kamalish07.github.io/focus/#stopwatch",
+      "chosenIconUrl": "https://kamalish07.github.io/focus/icons/icon-96.png"
+    },
+    {
+      "name": "Timer",
+      "shortName": "Timer",
+      "url": "https://kamalish07.github.io/focus/#timer",
+      "chosenIconUrl": "https://kamalish07.github.io/focus/icons/icon-96.png"
+    },
+    {
+      "name": "Pomodoro",
+      "shortName": "Pomodoro",
+      "url": "https://kamalish07.github.io/focus/#pomodoro",
+      "chosenIconUrl": "https://kamalish07.github.io/focus/icons/icon-96.png"
+    },
+    {
+      "name": "Statistics",
+      "shortName": "Stats",
+      "url": "https://kamalish07.github.io/focus/#stats",
+      "chosenIconUrl": "https://kamalish07.github.io/focus/icons/icon-96.png"
+    }
+  ],
+  "generatorApp": "unknown",
+  "webManifestUrl": "https://kamalish07.github.io/focus/manifest.webmanifest",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://kamalish07.github.io/focus/",
+  "minSdkVersion": 21,
+  "orientation": "any",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "protocolHandlers": [],
+  "fileHandlers": [],
+  "launchHandlerClientMode": "focus-existing",
+  "displayOverride": [],
+  "appVersion": "1.10.0"
+}
