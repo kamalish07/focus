@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -130,6 +130,7 @@ const KEY = 'focus.v1';
 const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
+  face: 'flip', // flip | minimal | led | nixie | ring
   font: 'barlow',
   digitScale: 1,
   radius: 0.09,
@@ -231,6 +232,8 @@ const DEMO = new URLSearchParams(location.search).has('demo');
 function demoData() {
   const d = defaults();
   Object.assign(d.settings, { seenTip: true, askedNotif: true });
+  const face = new URLSearchParams(location.search).get('face');
+  if (face) d.settings.face = face;
   d.cats = [
     { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
     { id: 'math', name: 'Math', color: PALETTE[1], goal: 60 },
@@ -1274,6 +1277,318 @@ function sizeCards(el, { cw, ch, gap = 0 }, m, s) {
 return { FlipClock, clearMetrics, fontMetrics, sizeCards };
 })();
 
+// ---------- faces.js ----------
+__m.faces = (() => {
+// Clock faces. Every face shows a list of digit groups (e.g. ['47', '19']) and sizes itself
+// to the box it's given. Flip is the original split-flap clock; the others are alternatives.
+const { FlipClock, fontMetrics, sizeCards } = __m.flip;
+const { fontById } = __m.config;
+const { data } = __m.store;
+const { clamp } = __m.util;
+
+const FACES = [
+  ['flip', 'Flip'],
+  ['minimal', 'Minimal'],
+  ['led', 'LED'],
+  ['nixie', 'Nixie'],
+  ['ring', 'Ring'],
+];
+
+const metrics = () => fontMetrics(fontById(data.settings.font));
+const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
+
+/** Builds a face inside `el` (replacing whatever was there). */
+function makeFace(el, type = 'flip') {
+  if (!FACES.some(([id]) => id === type)) type = 'flip';
+  for (const a of el.getAnimations({ subtree: true })) a.cancel();
+  el.innerHTML = '';
+  el.removeAttribute('style');
+  for (const [id] of FACES) el.classList.remove(`face-${id}`);
+  el.classList.add(`face-${type}`);
+  const face = { flip: flipFace, minimal: minimalFace, led: ledFace, nixie: nixieFace, ring: ringFace }[type](el);
+  face.type = type;
+  return face;
+}
+
+/* ---------- Flip: split-flap cards ---------- */
+
+function flipFace(el) {
+  const clock = new FlipClock(el);
+  return {
+    get count() {
+      return clock.cards.length;
+    },
+    render(groups, o = {}) {
+      clock.render(groups, !!o.animate && data.settings.flip);
+    },
+    fit({ W, H, row, stretch }) {
+      const n = Math.max(1, clock.cards.length);
+      let cw;
+      let ch;
+      let gap;
+      if (row) {
+        gap = clamp(W * 0.018, 6, 22);
+        cw = (W - gap * (n - 1)) / n;
+        ch = Math.min(H, cw * (stretch ? 1.3 : 1.02));
+        cw = Math.min(cw, ch * (stretch ? 1.7 : 1.12));
+      } else {
+        gap = clamp(H * 0.022, 6, 18);
+        ch = (H - gap * (n - 1)) / n;
+        cw = Math.min(W, ch * (stretch ? 2.2 : 1.35));
+        ch = Math.min(ch, cw * (stretch ? 1.35 : 1));
+      }
+      el.style.flexDirection = row ? 'row' : 'column';
+      sizeCards(el, { cw: Math.floor(cw), ch: Math.floor(ch / 2) * 2, gap: Math.round(gap) }, metrics(), data.settings);
+    },
+  };
+}
+
+/* ---------- helpers for faces made of digit groups ---------- */
+
+/** Keeps `n` groups of digit elements in `root`, with separators between them. */
+function groupKeeper(root, { groupClass, sepHtml, digitHtml }) {
+  let groups = [];
+  return {
+    get list() {
+      return groups;
+    },
+    ensure(n) {
+      if (groups.length === n) return false;
+      root.innerHTML = '';
+      groups = [];
+      for (let i = 0; i < n; i++) {
+        if (i) root.insertAdjacentHTML('beforeend', sepHtml);
+        const g = document.createElement('div');
+        g.className = groupClass;
+        root.appendChild(g);
+        groups.push({ el: g, digits: [], value: '' });
+      }
+      return true;
+    },
+    /** Makes sure a group has one element per character; returns the digit elements. */
+    digits(g, len) {
+      if (g.digits.length !== len) {
+        g.el.innerHTML = digitHtml.repeat(len);
+        g.digits = [...g.el.children];
+        g.value = '';
+      }
+      return g.digits;
+    },
+  };
+}
+
+/* ---------- Minimal: big clean digits that roll into place ---------- */
+
+function minimalFace(el) {
+  const root = document.createElement('div');
+  root.className = 'mn';
+  el.appendChild(root);
+  const k = groupKeeper(root, { groupClass: 'mn-g', sepHtml: '<span class="mn-sep">:</span>', digitHtml: '<span class="mn-d"></span>' });
+  return {
+    get count() {
+      return k.list.length;
+    },
+    render(vals, o = {}) {
+      k.ensure(vals.length);
+      root.classList.toggle('running', !!o.running);
+      vals.forEach((v, i) => {
+        const g = k.list[i];
+        if (g.value === v) return;
+        const had = g.value !== '';
+        const ds = k.digits(g, v.length);
+        [...v].forEach((ch, j) => {
+          if (ds[j].textContent === ch) return;
+          ds[j].textContent = ch;
+          if (o.animate && had) {
+            ds[j].animate([{ transform: 'translateY(-28%)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 340, easing: 'cubic-bezier(.2,.8,.2,1)' });
+          }
+        });
+        g.value = v;
+      });
+    },
+    fit({ W, H, row }) {
+      const m = metrics();
+      const n = Math.max(1, k.list.length);
+      const len = Math.max(2, ...k.list.map((g) => g.value.length || 2));
+      let fs;
+      if (row) fs = Math.min((W * 0.94) / (n * len * m.w1 + (n - 1) * 0.42), (H * 0.8) / m.glyphH);
+      else fs = Math.min((W * 0.92) / (len * m.w1), (H * 0.94) / n / (m.glyphH * 1.2));
+      root.classList.toggle('col', !row);
+      px(el, '--mfs', fs);
+      px(el, '--mdy', m.dy * fs);
+      px(el, '--mlh', m.glyphH * fs * (row ? 1.3 : 1.18));
+    },
+  };
+}
+
+/* ---------- LED: seven-segment display ---------- */
+
+const T = 11;
+const HW = T / 2;
+const hSeg = (x1, x2, y) => `${x1},${y} ${x1 + HW},${y - HW} ${x2 - HW},${y - HW} ${x2},${y} ${x2 - HW},${y + HW} ${x1 + HW},${y + HW}`;
+const vSeg = (x, y1, y2) => `${x},${y1} ${x + HW},${y1 + HW} ${x + HW},${y2 - HW} ${x},${y2} ${x - HW},${y2 - HW} ${x - HW},${y1 + HW}`;
+const SEGS = {
+  a: hSeg(10, 50, 8),
+  b: vSeg(52, 10, 48),
+  c: vSeg(52, 52, 90),
+  d: hSeg(10, 50, 92),
+  e: vSeg(8, 52, 90),
+  f: vSeg(8, 10, 48),
+  g: hSeg(10, 50, 50),
+};
+const LIT = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'acdefg', 'abc', 'abcdefg', 'abcdfg'];
+const ledDigit = (x) =>
+  `<g transform="translate(${x},0) skewX(-6)">${Object.entries(SEGS).map(([s, p]) => `<polygon class="s" data-s="${s}" points="${p}"/>`).join('')}</g>`;
+
+function ledFace(el) {
+  const root = document.createElement('div');
+  root.className = 'led';
+  el.appendChild(root);
+  let groups = [];
+  const build = (vals) => {
+    root.innerHTML = '';
+    groups = vals.map((v, i) => {
+      if (i) root.insertAdjacentHTML('beforeend', '<span class="led-sep"><i></i><i></i></span>');
+      const len = v.length;
+      const w = len * 66 - 6;
+      root.insertAdjacentHTML('beforeend', `<svg class="led-g" viewBox="-12 0 ${w + 14} 100" style="--n:${len}" aria-hidden="true">${[...Array(len)].map((_, j) => ledDigit(j * 66)).join('')}</svg>`);
+      const svg = root.lastElementChild;
+      return { len, value: '', digits: [...svg.querySelectorAll('g')].map((g) => [...g.querySelectorAll('.s')]) };
+    });
+  };
+  return {
+    get count() {
+      return groups.length;
+    },
+    render(vals, o = {}) {
+      if (vals.length !== groups.length || vals.some((v, i) => v.length !== groups[i].len)) build(vals);
+      root.classList.toggle('running', !!o.running);
+      vals.forEach((v, i) => {
+        const g = groups[i];
+        if (g.value === v) return;
+        g.value = v;
+        [...v].forEach((ch, j) => {
+          const on = LIT[Number(ch)] || '';
+          for (const p of g.digits[j]) p.classList.toggle('on', on.includes(p.dataset.s));
+        });
+      });
+    },
+    fit({ W, H, row }) {
+      const n = Math.max(1, groups.length);
+      const len = Math.max(2, ...groups.map((g) => g.len));
+      const ratio = (len * 66 + 8) / 100; // width / height of one group
+      let h;
+      if (row) h = Math.min(H * 0.72, (W * 0.84) / (n * ratio + (n - 1) * 0.36));
+      else h = Math.min((H * 0.8) / n - H * 0.02, (W * 0.8) / ratio);
+      root.classList.toggle('col', !row);
+      px(el, '--lh', Math.max(10, h));
+    },
+  };
+}
+
+/* ---------- Nixie: glowing tube digits ---------- */
+
+function nixieFace(el) {
+  const root = document.createElement('div');
+  root.className = 'nx';
+  el.appendChild(root);
+  const tube = `<div class="nx-t">${[1, 6, 2, 7, 5, 0, 4, 9, 8, 3].map((d) => `<span data-d="${d}">${d}</span>`).join('')}</div>`;
+  const k = groupKeeper(root, { groupClass: 'nx-g', sepHtml: '<span class="nx-sep"><i></i><i></i></span>', digitHtml: tube });
+  return {
+    get count() {
+      return k.list.length;
+    },
+    render(vals, o = {}) {
+      k.ensure(vals.length);
+      root.classList.toggle('running', !!o.running);
+      vals.forEach((v, i) => {
+        const g = k.list[i];
+        if (g.value === v) return;
+        const tubes = k.digits(g, v.length);
+        [...v].forEach((ch, j) => {
+          tubes[j].querySelector('.on')?.classList.remove('on');
+          tubes[j].querySelector(`[data-d="${ch}"]`)?.classList.add('on');
+        });
+        g.value = v;
+      });
+    },
+    fit({ W, H, row }) {
+      const n = Math.max(1, k.list.length);
+      const len = Math.max(2, ...k.list.map((g) => g.value.length || 2));
+      const A = 0.6; // tube width / height
+      let tw;
+      if (row) tw = Math.min((W * 0.92) / (n * len + n * 0.1 * (len - 1) + (n - 1) * 0.5), H * 0.8 * A);
+      else tw = Math.min((W * 0.86) / (len + 0.1 * (len - 1)), ((H * 0.9) / n - H * 0.03) * A);
+      root.classList.toggle('col', !row);
+      px(el, '--tw', tw);
+      px(el, '--th', tw / A);
+    },
+  };
+}
+
+/* ---------- Ring: time inside a progress ring ---------- */
+
+const R = 84;
+const CIRC = 2 * Math.PI * R;
+
+function ringFace(el) {
+  let ticks = '';
+  for (let i = 0; i < 60; i++) {
+    const a = (i / 60) * 2 * Math.PI;
+    const major = i % 5 === 0;
+    const r1 = major ? 91 : 93.5;
+    const r2 = 97;
+    ticks += `<line class="${major ? 'major' : ''}" x1="${100 + r1 * Math.sin(a)}" y1="${100 - r1 * Math.cos(a)}" x2="${100 + r2 * Math.sin(a)}" y2="${100 - r2 * Math.cos(a)}"/>`;
+  }
+  el.innerHTML = `<div class="rg">
+      <svg class="rg-svg" viewBox="0 0 200 200" aria-hidden="true"><g class="rg-ticks">${ticks}</g>
+        <circle class="rg-track" cx="100" cy="100" r="${R}"/>
+        <circle class="rg-arc" cx="100" cy="100" r="${R}" transform="rotate(-90 100 100)" stroke-dasharray="0 ${CIRC}"/>
+        <circle class="rg-dot" cx="100" cy="${100 - R}" r="5"/></svg>
+      <div class="rg-mid"><div class="rg-time"></div><div class="rg-label"></div></div>
+    </div>`;
+  const root = el.firstElementChild;
+  const time = root.querySelector('.rg-time');
+  const label = root.querySelector('.rg-label');
+  const arc = root.querySelector('.rg-arc');
+  const dot = root.querySelector('.rg-dot');
+  let n = 0;
+  let len = 2;
+  let lastP = 0;
+  return {
+    get count() {
+      return n;
+    },
+    render(vals, o = {}) {
+      n = vals.length;
+      len = Math.max(2, ...vals.map((v) => v.length));
+      const t = vals.join(':');
+      if (time.textContent !== t) time.textContent = t;
+      const l = o.label || '';
+      if (label.textContent !== l) label.textContent = l;
+      const p = clamp(o.progress ?? 0, 0, 1);
+      root.classList.toggle('jump', p < lastP - 0.02 || !o.animate); // no sweeping backwards
+      lastP = p;
+      arc.setAttribute('stroke-dasharray', `${(p * CIRC).toFixed(2)} ${CIRC.toFixed(2)}`);
+      const a = p * 2 * Math.PI;
+      dot.setAttribute('cx', (100 + R * Math.sin(a)).toFixed(2));
+      dot.setAttribute('cy', (100 - R * Math.cos(a)).toFixed(2));
+      root.classList.toggle('empty', p <= 0);
+    },
+    fit({ W, H }) {
+      const m = metrics();
+      const D = Math.min(W, H) * 0.97;
+      const k = Math.max(1, n);
+      const fs = Math.min((D * 0.64) / (k * len * m.w1 + (k - 1) * 0.36), (D * 0.27) / m.glyphH);
+      px(el, '--rd', D);
+      px(el, '--rfs', fs);
+      px(el, '--rls', Math.max(10, D * 0.05));
+    },
+  };
+}
+return { FACES, makeFace };
+})();
+
 // ---------- ui.js ----------
 __m.ui = (() => {
 const { data } = __m.store;
@@ -1307,6 +1622,9 @@ const PATHS = {
   calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/>',
   grid: '<rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/>',
   trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  face: '<rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/><path d="M3 12h8M13 12h8"/>',
 };
 
 const icon = (name, cls = '') =>
@@ -2347,9 +2665,8 @@ __m.home = (() => {
 // Home: the current time as a big flip clock filling about 70% of the screen, and below
 // it a card grid with the clock you're running, today's goals, streaks and trends.
 const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, streak, bestStreak, recentSessions, sessionDur, sessionEnd } = __m.store;
-const { fontById } = __m.config;
 const engine = __m.engine;
-const { FlipClock, fontMetrics, sizeCards } = __m.flip;
+const { makeFace } = __m.faces;
 const { icon } = __m.ui;
 const { openSessionEditor } = __m.sheets;
 const { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } = __m.util;
@@ -2410,7 +2727,7 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
   const sub = root.querySelector('.home-clock-sub');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
-  const clock = new FlipClock(clockEl);
+  let face = makeFace(clockEl, data.settings.face);
   let minuteKey = '';
   let chartW = 0;
 
@@ -2428,28 +2745,9 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
     const landscape = document.getElementById('app').classList.contains('landscape');
     const heroH = Math.round(clamp(innerHeight * HERO_SHARE, 240, Math.max(240, root.clientHeight - 40)));
     hero.style.height = `${heroH}px`;
-    clockEl.style.flexDirection = landscape ? 'row' : 'column';
-    const n = Math.max(2, clock.cards.length);
     const W = clockEl.clientWidth;
     const H = clockEl.clientHeight;
-    if (W && H) {
-      let cw;
-      let ch;
-      let gap;
-      if (landscape) {
-        gap = clamp(W * 0.02, 8, 20);
-        cw = (W - gap * (n - 1)) / n;
-        ch = Math.min(H, cw);
-        cw = Math.min(cw, ch * 1.35);
-      } else {
-        gap = clamp(H * 0.025, 8, 16);
-        ch = (H - gap * (n - 1)) / n;
-        cw = Math.min(W, ch * 2.2);
-        ch = Math.min(ch, cw);
-      }
-      ch = Math.floor(ch / 2) * 2;
-      sizeCards(clockEl, { cw: Math.floor(cw), ch, gap: Math.round(gap) }, fontMetrics(fontById(data.settings.font)), data.settings);
-    }
+    if (W && H) face.fit({ W, H, row: landscape, stretch: true });
     const w = bento.clientWidth;
     if (w && w !== chartW) drawCharts();
   }
@@ -2702,11 +3000,13 @@ function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
   }
 
   function tick(now = Date.now(), animate = true) {
+    if (face.type !== data.settings.face) face = makeFace(clockEl, data.settings.face);
     const ds = digits(now);
-    const countChanged = ds.length !== clock.cards.length;
-    clock.render(ds, animate && !countChanged && data.settings.flip);
-    if (countChanged) fit();
+    const countChanged = ds.length !== face.count;
     const d = new Date(now);
+    const label = is24() ? d.toLocaleDateString([], { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
+    face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label });
+    if (countChanged) fit();
     const mk = `${d.getHours()}:${d.getMinutes()}`;
     if (mk !== minuteKey) {
       minuteKey = mk;
@@ -2790,7 +3090,7 @@ __m.settings = (() => {
 const { data, save, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } = __m.store;
 const { THEMES, FONTS, SOUNDS, APP_VERSION, themeColors, fontById } = __m.config;
 const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } = __m.ui;
-const { FlipClock, fontMetrics, sizeCards } = __m.flip;
+const { makeFace, FACES } = __m.faces;
 const engine = __m.engine;
 const audio = __m.audio;
 const pwa = __m.pwa;
@@ -2866,6 +3166,15 @@ function openSettings() {
     const p = s.pomo;
     return `
       <div class="preview"><div class="clock preview-clock"></div></div>
+
+      ${group(
+        'Clock style',
+        `<div class="face-tiles">${FACES.map(
+          ([id, name]) =>
+            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
+        ).join('')}</div>`,
+        'pad'
+      )}
 
       ${group('Theme', `<div class="themes">${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}${themeTile('custom', s.custom, 'Custom')}</div>`, 'pad')}
       ${group(
@@ -2964,23 +3273,43 @@ function openSettings() {
 
   function mountPreview() {
     const el = root.querySelector('.preview-clock');
-    const mini = new FlipClock(el);
+    let face = null;
     const size = () => {
-      const W = Math.min(el.parentElement.clientWidth, 400);
-      const gap = Math.round(W * 0.03);
-      const cw = Math.floor((W - gap) / 2);
-      sizeCards(el, { cw, ch: Math.floor(cw * 0.82), gap }, fontMetrics(fontById(data.settings.font)), data.settings);
+      const W = Math.min(el.parentElement.clientWidth, 420);
+      el.style.width = `${W}px`;
+      el.style.height = `${Math.round(W * (face?.type === 'ring' ? 0.62 : 0.44))}px`;
+      face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
     };
     const draw = (animate) => {
-      const [, m, sec] = hms(engine.displayMs(), engine.isCountdown());
-      mini.render([pad(m), pad(sec)], animate && data.settings.flip);
+      if (face?.type !== data.settings.face) {
+        face = makeFace(el, data.settings.face);
+        draw(false);
+        size();
+        return;
+      }
+      const ms = engine.displayMs();
+      const [, m, sec] = hms(ms, engine.isCountdown());
+      face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview' });
     };
-    size();
     draw(false);
     clearInterval(iv);
     iv = setInterval(() => draw(true), 250);
     offFit?.();
-    offFit = on('fit', size);
+    offFit = on('fit', () => {
+      size();
+      drawFaceTiles(); // re-measure once web fonts have loaded
+    });
+    drawFaceTiles();
+  }
+
+  /** Each style tile shows a real, tiny version of that clock face. */
+  function drawFaceTiles() {
+    for (const tile of root.querySelectorAll('.face-tile')) {
+      const el = tile.querySelector('.face-mini');
+      const f = makeFace(el, tile.dataset.face);
+      f.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '' });
+      f.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
+    }
   }
 
   function render() {
@@ -3037,6 +3366,12 @@ function openSettings() {
     if (th) {
       s.theme = th.dataset.theme;
       refreshThemeUI();
+      return changed();
+    }
+    const fc = e.target.closest('.face-tile');
+    if (fc) {
+      s.face = fc.dataset.face;
+      root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
       return changed();
     }
     const ft = e.target.closest('[data-font]');
@@ -3140,7 +3475,8 @@ const { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor,
 const engine = __m.engine;
 const audio = __m.audio;
 const bg = __m.background;
-const { FlipClock, fontMetrics, clearMetrics, sizeCards } = __m.flip;
+const { fontMetrics, clearMetrics } = __m.flip;
+const { makeFace } = __m.faces;
 const { icon, toast, dialog, overlayOpen, haptic, canVibrate } = __m.ui;
 const { openEditor, openCategories } = __m.sheets;
 const { mountStats } = __m.stats;
@@ -3159,7 +3495,8 @@ const skipBtn = $('#btn-skip');
 const infoLeft = $('#info-left');
 const infoRight = $('#info-right');
 const progress = $('#progress');
-const clock = new FlipClock(clockEl);
+const fullBtn = $('#btn-full');
+let face = makeFace(clockEl, data.settings.face);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let metrics = null;
 let tab = 'home';
@@ -3212,32 +3549,14 @@ function applyOrientation() {
 }
 
 /**
- * Size the timer's cards to fill the space available, in a row or a column.
- * In full-screen mode the cards may stretch further so they cover the whole screen.
+ * Size the clock face to fill the space available, in a row or a column.
+ * In full-screen mode it may stretch further so it covers the whole screen.
  */
 function fitClock() {
-  const row = appEl.classList.contains('layout-row');
-  const full = appEl.classList.contains('immersive');
-  const n = Math.max(1, clock.cards.length);
   const W = clockEl.clientWidth;
   const H = clockEl.clientHeight;
   if (!W || !H || !metrics) return;
-  let cw;
-  let ch;
-  let gap;
-  if (row) {
-    gap = clamp(W * 0.018, 6, 22);
-    cw = (W - gap * (n - 1)) / n;
-    ch = Math.min(H, cw * (full ? 1.3 : 1.02));
-    cw = Math.min(cw, ch * (full ? 1.7 : 1.12));
-  } else {
-    gap = clamp(H * 0.022, 6, 18);
-    ch = (H - gap * (n - 1)) / n;
-    cw = Math.min(W, ch * (full ? 2.2 : 1.35));
-    ch = Math.min(ch, cw * (full ? 1.35 : 1));
-  }
-  ch = Math.floor(ch / 2) * 2;
-  sizeCards(clockEl, { cw: Math.floor(cw), ch, gap: Math.round(gap) }, metrics, S());
+  face.fit({ W, H, row: appEl.classList.contains('layout-row'), stretch: appEl.classList.contains('immersive') });
 }
 
 function fit() {
@@ -3248,6 +3567,10 @@ function fit() {
 }
 
 function applyAll() {
+  if (face.type !== S().face) {
+    face = makeFace(clockEl, S().face);
+    lastDigits = '';
+  }
   applyTheme();
   document.body.classList.toggle('no-hinge', !S().hinge);
   audio.setVolume(S().volume);
@@ -3275,7 +3598,9 @@ function showTab(t) {
   try {
     if (!DEMO) localStorage.setItem('focus.tab', t);
   } catch {}
-  appEl.classList.remove('chrome-hidden', 'immersive');
+  appEl.classList.remove('chrome-hidden', 'immersive', 'overlay-on');
+  syncFullButton();
+  suppressAuto = false;
   fit();
   if (t === 'home') home.refresh();
   if (t === 'stats') stats.refresh();
@@ -3331,15 +3656,19 @@ function renderClock(now, force) {
   const m = engine.view();
   const r = engine.runner(m);
   const digits = digitsFor(engine.displayMs(m, now), engine.isCountdown(m));
-  const countChanged = digits.length !== clock.cards.length;
-  const animate = S().flip && !reduceMotion.matches && !force && !countChanged && !document.hidden;
-  clock.render(digits, animate);
+  const countChanged = digits.length !== face.count;
+  const animate = !reduceMotion.matches && !force && !countChanged && !document.hidden;
+  const running = engine.running(m);
+  // Ring progress: a countdown empties as time runs out; the stopwatch sweeps once a minute.
+  const prog = m === 'stopwatch' ? (engine.elapsed(m, now) % MIN) / MIN : r.dur ? engine.remaining(m, now) / r.dur : 0;
+  const cat = catById(engine.current(m)?.cat || currentCat().id);
+  const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.name;
+  face.render(digits, { animate, running, progress: prog, label });
   if (countChanged) fitClock();
   const joined = `${m}|${digits.join(':')}`;
-  if (!force && joined !== lastDigits && S().tick && engine.running(m) && !document.hidden) audio.tick();
+  if (!force && joined !== lastDigits && S().tick && running && !document.hidden) audio.tick();
   lastDigits = joined;
 
-  const running = engine.running(m);
   if (playBtn.dataset.state !== String(running)) {
     playBtn.dataset.state = String(running);
     playBtn.innerHTML = icon(running ? 'pause' : 'play');
@@ -3349,7 +3678,6 @@ function renderClock(now, force) {
   clockEl.classList.toggle('done', !!r.done);
   clockView.classList.toggle('is-break', m === 'pomodoro' && r.phase !== 'focus');
 
-  const cat = catById(engine.current(m)?.cat || currentCat().id);
   $('#btn-cat .dot').style.setProperty('--c', cat.color);
   setText($('#btn-cat .pill-name'), cat.name);
 
@@ -3457,6 +3785,7 @@ function togglePlay(m = engine.view()) {
     if (isModeTab()) openEditor();
     return;
   }
+  suppressAuto = false;
   const res = engine.play(m);
   bg.kick();
   if (res?.paused.length) toast(`${engine.modeName(res.paused[0])} paused`);
@@ -3503,21 +3832,41 @@ document.addEventListener('keydown', (e) => {
     togglePlay();
   } else if (e.key === 'r') onReset();
   else if (e.key === 'e') openEditor();
+  else if (e.key === 'f') toggleFull();
+  else if (e.key === 'Escape' && isFull()) toggleFull();
 });
 
-/* ---------- full-screen clock while running ----------
-   A few seconds after a clock starts, the buttons fade out and are then removed so the
-   cards can grow to cover the screen. Tapping anywhere brings the options back. */
+/* ---------- full-screen clock ----------
+   A few seconds after a clock starts (or when you tap the full-screen button) everything
+   but the clock is removed and the face grows to cover the screen. From then on the
+   controls float over the clock like a video player: tap to show them, and they fade
+   away again while the clock runs. Nothing underneath moves. */
 
 let hideTimer = 0;
 let fullTimer = 0;
+let overlayTimer = 0;
 let sizingTimer = 0;
 let swallowClick = false;
+let suppressAuto = false; // you left full screen yourself: don't re-enter until the next start
+
+const isFull = () => appEl.classList.contains('immersive');
+
+function syncFullButton() {
+  const full = isFull();
+  if (fullBtn.dataset.full === String(full)) return;
+  fullBtn.dataset.full = String(full);
+  fullBtn.innerHTML = icon(full ? 'collapse' : 'expand');
+  fullBtn.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
+  fullBtn.title = full ? 'Exit full screen (F)' : 'Full screen (F)';
+}
 
 function setImmersive(on) {
-  if (appEl.classList.contains('immersive') === on) return;
-  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the cards growing/shrinking
+  if (isFull() === on) return;
+  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the face growing/shrinking
+  appEl.classList.remove('chrome-hidden');
   appEl.classList.toggle('immersive', on);
+  if (!on) appEl.classList.remove('overlay-on');
+  syncFullButton();
   fit();
   clearTimeout(sizingTimer);
   sizingTimer = setTimeout(() => {
@@ -3526,21 +3875,61 @@ function setImmersive(on) {
   }, 600);
 }
 
-function poke() {
-  appEl.classList.remove('chrome-hidden');
-  setImmersive(false);
-  clearTimeout(hideTimer);
-  clearTimeout(fullTimer);
-  if (S().autoHide && isModeTab() && engine.running()) {
-    hideTimer = setTimeout(() => {
-      if (!isModeTab() || !engine.running() || overlayOpen()) return;
-      appEl.classList.add('chrome-hidden');
-      fullTimer = setTimeout(() => appEl.classList.contains('chrome-hidden') && setImmersive(true), 450);
-    }, 3500);
-  }
+/** Show or hide the floating controls in full screen. They stay while the clock is stopped. */
+function showOverlay(on) {
+  appEl.classList.toggle('overlay-on', on);
+  clearTimeout(overlayTimer);
+  if (on && engine.running()) overlayTimer = setTimeout(() => !overlayOpen() && showOverlay(false), 3200);
 }
 
+/** Outside full screen: fade the buttons, then go full screen after a few idle seconds. */
+function scheduleAuto() {
+  clearTimeout(hideTimer);
+  clearTimeout(fullTimer);
+  if (!S().autoHide || suppressAuto || !isModeTab() || !engine.running() || isFull()) return;
+  hideTimer = setTimeout(() => {
+    if (!isModeTab() || !engine.running() || overlayOpen()) return;
+    appEl.classList.add('chrome-hidden');
+    fullTimer = setTimeout(() => appEl.classList.contains('chrome-hidden') && setImmersive(true), 450);
+  }, 3500);
+}
+
+function poke() {
+  if (isFull()) {
+    if (!isModeTab()) setImmersive(false);
+    else showOverlay(true);
+    return;
+  }
+  appEl.classList.remove('chrome-hidden');
+  scheduleAuto();
+}
+
+function toggleFull() {
+  haptic(6);
+  if (isFull()) {
+    suppressAuto = true;
+    setImmersive(false);
+    scheduleAuto();
+  } else {
+    setImmersive(true);
+    showOverlay(true);
+  }
+}
+fullBtn.addEventListener('click', toggleFull);
+
 appEl.addEventListener('pointerdown', (e) => {
+  swallowClick = false;
+  if (isFull()) {
+    const onControl = e.target.closest('.topbar button, .controls');
+    if (!appEl.classList.contains('overlay-on')) {
+      swallowClick = true; // first tap only reveals the controls
+      showOverlay(true);
+    } else if (!onControl) {
+      swallowClick = true; // tap on the clock hides them again
+      showOverlay(false);
+    } else showOverlay(true);
+    return;
+  }
   swallowClick = appEl.classList.contains('chrome-hidden') && !e.target.closest('.controls');
   poke();
 }, true);
@@ -3550,7 +3939,13 @@ appEl.addEventListener('click', (e) => {
   e.stopPropagation();
   e.preventDefault();
 }, true);
-addEventListener('mousemove', () => appEl.classList.contains('chrome-hidden') && poke());
+// Real mouse movement only: phones send a fake mouse event after every tap, which would
+// otherwise re-show the controls a tap just hid.
+addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  if (isFull()) showOverlay(true);
+  else if (appEl.classList.contains('chrome-hidden')) poke();
+});
 
 /* ---------- keep the screen awake while the app is open ---------- */
 
@@ -3634,6 +4029,9 @@ applyAll();
 if (DEMO && new URLSearchParams(location.search).has('scroll')) {
   setTimeout(() => ($('.view-home').scrollTop = $('.home-bento').offsetTop - 14), 400);
 }
+// Demo only: ?demo&tap shows the full-screen controls once full screen has kicked in.
+if (DEMO && new URLSearchParams(location.search).has('tap')) setTimeout(() => isFull() && showOverlay(true), 5500);
+if (DEMO && new URLSearchParams(location.search).has('settings')) setTimeout(openSettings, 300);
 setInterval(frame, 150);
 initPWA();
 return {  };

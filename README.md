@@ -14,7 +14,10 @@ like a normal app, works offline, and keeps all data on your device.
   the phone is sideways. Each mode keeps its own clock, and starting one pauses any other.
 - **Home:** a big flip clock with the current time, the clock you're running, goal rings for
   today, streak, this week vs last week, a week chart, a consistency heatmap and recent sessions.
-- **Flip clock** with real split-flap animation. Vertical on phones, horizontal in landscape.
+- **Five clock styles:** Flip (split-flap animation), Minimal, LED seven-segment, Nixie tubes and
+  Ring. Vertical on phones, horizontal in landscape.
+- **Full-screen clock:** while a clock runs, it fills the screen. Tap for floating controls, like a
+  video player.
 - **Stopwatch, Timer and Pomodoro** modes. Time is measured from timestamps, so it stays
   correct when the phone sleeps or the app is closed.
 - **Runs with the screen off:** while a clock runs, Focus plays an inaudible track (or brown,

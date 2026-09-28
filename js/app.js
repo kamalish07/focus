@@ -4,7 +4,8 @@ import { data, on, emit, saveSoon, currentCat, catById, dayKey, dayData, goalFor
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as bg from './background.js';
-import { FlipClock, fontMetrics, clearMetrics, sizeCards } from './flip.js';
+import { fontMetrics, clearMetrics } from './flip.js';
+import { makeFace } from './faces.js';
 import { icon, toast, dialog, overlayOpen, haptic, canVibrate } from './ui.js';
 import { openEditor, openCategories } from './sheets.js';
 import { mountStats } from './stats.js';
@@ -23,7 +24,8 @@ const skipBtn = $('#btn-skip');
 const infoLeft = $('#info-left');
 const infoRight = $('#info-right');
 const progress = $('#progress');
-const clock = new FlipClock(clockEl);
+const fullBtn = $('#btn-full');
+let face = makeFace(clockEl, data.settings.face);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 let metrics = null;
 let tab = 'home';
@@ -76,32 +78,14 @@ function applyOrientation() {
 }
 
 /**
- * Size the timer's cards to fill the space available, in a row or a column.
- * In full-screen mode the cards may stretch further so they cover the whole screen.
+ * Size the clock face to fill the space available, in a row or a column.
+ * In full-screen mode it may stretch further so it covers the whole screen.
  */
 function fitClock() {
-  const row = appEl.classList.contains('layout-row');
-  const full = appEl.classList.contains('immersive');
-  const n = Math.max(1, clock.cards.length);
   const W = clockEl.clientWidth;
   const H = clockEl.clientHeight;
   if (!W || !H || !metrics) return;
-  let cw;
-  let ch;
-  let gap;
-  if (row) {
-    gap = clamp(W * 0.018, 6, 22);
-    cw = (W - gap * (n - 1)) / n;
-    ch = Math.min(H, cw * (full ? 1.3 : 1.02));
-    cw = Math.min(cw, ch * (full ? 1.7 : 1.12));
-  } else {
-    gap = clamp(H * 0.022, 6, 18);
-    ch = (H - gap * (n - 1)) / n;
-    cw = Math.min(W, ch * (full ? 2.2 : 1.35));
-    ch = Math.min(ch, cw * (full ? 1.35 : 1));
-  }
-  ch = Math.floor(ch / 2) * 2;
-  sizeCards(clockEl, { cw: Math.floor(cw), ch, gap: Math.round(gap) }, metrics, S());
+  face.fit({ W, H, row: appEl.classList.contains('layout-row'), stretch: appEl.classList.contains('immersive') });
 }
 
 function fit() {
@@ -112,6 +96,10 @@ function fit() {
 }
 
 function applyAll() {
+  if (face.type !== S().face) {
+    face = makeFace(clockEl, S().face);
+    lastDigits = '';
+  }
   applyTheme();
   document.body.classList.toggle('no-hinge', !S().hinge);
   audio.setVolume(S().volume);
@@ -139,7 +127,9 @@ function showTab(t) {
   try {
     if (!DEMO) localStorage.setItem('focus.tab', t);
   } catch {}
-  appEl.classList.remove('chrome-hidden', 'immersive');
+  appEl.classList.remove('chrome-hidden', 'immersive', 'overlay-on');
+  syncFullButton();
+  suppressAuto = false;
   fit();
   if (t === 'home') home.refresh();
   if (t === 'stats') stats.refresh();
@@ -195,15 +185,19 @@ function renderClock(now, force) {
   const m = engine.view();
   const r = engine.runner(m);
   const digits = digitsFor(engine.displayMs(m, now), engine.isCountdown(m));
-  const countChanged = digits.length !== clock.cards.length;
-  const animate = S().flip && !reduceMotion.matches && !force && !countChanged && !document.hidden;
-  clock.render(digits, animate);
+  const countChanged = digits.length !== face.count;
+  const animate = !reduceMotion.matches && !force && !countChanged && !document.hidden;
+  const running = engine.running(m);
+  // Ring progress: a countdown empties as time runs out; the stopwatch sweeps once a minute.
+  const prog = m === 'stopwatch' ? (engine.elapsed(m, now) % MIN) / MIN : r.dur ? engine.remaining(m, now) / r.dur : 0;
+  const cat = catById(engine.current(m)?.cat || currentCat().id);
+  const label = m === 'pomodoro' ? (r.phase === 'focus' ? `Focus ${r.round}/${S().pomo.every}` : engine.phaseName()) : cat.name;
+  face.render(digits, { animate, running, progress: prog, label });
   if (countChanged) fitClock();
   const joined = `${m}|${digits.join(':')}`;
-  if (!force && joined !== lastDigits && S().tick && engine.running(m) && !document.hidden) audio.tick();
+  if (!force && joined !== lastDigits && S().tick && running && !document.hidden) audio.tick();
   lastDigits = joined;
 
-  const running = engine.running(m);
   if (playBtn.dataset.state !== String(running)) {
     playBtn.dataset.state = String(running);
     playBtn.innerHTML = icon(running ? 'pause' : 'play');
@@ -213,7 +207,6 @@ function renderClock(now, force) {
   clockEl.classList.toggle('done', !!r.done);
   clockView.classList.toggle('is-break', m === 'pomodoro' && r.phase !== 'focus');
 
-  const cat = catById(engine.current(m)?.cat || currentCat().id);
   $('#btn-cat .dot').style.setProperty('--c', cat.color);
   setText($('#btn-cat .pill-name'), cat.name);
 
@@ -321,6 +314,7 @@ function togglePlay(m = engine.view()) {
     if (isModeTab()) openEditor();
     return;
   }
+  suppressAuto = false;
   const res = engine.play(m);
   bg.kick();
   if (res?.paused.length) toast(`${engine.modeName(res.paused[0])} paused`);
@@ -367,21 +361,41 @@ document.addEventListener('keydown', (e) => {
     togglePlay();
   } else if (e.key === 'r') onReset();
   else if (e.key === 'e') openEditor();
+  else if (e.key === 'f') toggleFull();
+  else if (e.key === 'Escape' && isFull()) toggleFull();
 });
 
-/* ---------- full-screen clock while running ----------
-   A few seconds after a clock starts, the buttons fade out and are then removed so the
-   cards can grow to cover the screen. Tapping anywhere brings the options back. */
+/* ---------- full-screen clock ----------
+   A few seconds after a clock starts (or when you tap the full-screen button) everything
+   but the clock is removed and the face grows to cover the screen. From then on the
+   controls float over the clock like a video player: tap to show them, and they fade
+   away again while the clock runs. Nothing underneath moves. */
 
 let hideTimer = 0;
 let fullTimer = 0;
+let overlayTimer = 0;
 let sizingTimer = 0;
 let swallowClick = false;
+let suppressAuto = false; // you left full screen yourself: don't re-enter until the next start
+
+const isFull = () => appEl.classList.contains('immersive');
+
+function syncFullButton() {
+  const full = isFull();
+  if (fullBtn.dataset.full === String(full)) return;
+  fullBtn.dataset.full = String(full);
+  fullBtn.innerHTML = icon(full ? 'collapse' : 'expand');
+  fullBtn.setAttribute('aria-label', full ? 'Exit full screen' : 'Full screen');
+  fullBtn.title = full ? 'Exit full screen (F)' : 'Full screen (F)';
+}
 
 function setImmersive(on) {
-  if (appEl.classList.contains('immersive') === on) return;
-  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the cards growing/shrinking
+  if (isFull() === on) return;
+  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the face growing/shrinking
+  appEl.classList.remove('chrome-hidden');
   appEl.classList.toggle('immersive', on);
+  if (!on) appEl.classList.remove('overlay-on');
+  syncFullButton();
   fit();
   clearTimeout(sizingTimer);
   sizingTimer = setTimeout(() => {
@@ -390,21 +404,61 @@ function setImmersive(on) {
   }, 600);
 }
 
-function poke() {
-  appEl.classList.remove('chrome-hidden');
-  setImmersive(false);
-  clearTimeout(hideTimer);
-  clearTimeout(fullTimer);
-  if (S().autoHide && isModeTab() && engine.running()) {
-    hideTimer = setTimeout(() => {
-      if (!isModeTab() || !engine.running() || overlayOpen()) return;
-      appEl.classList.add('chrome-hidden');
-      fullTimer = setTimeout(() => appEl.classList.contains('chrome-hidden') && setImmersive(true), 450);
-    }, 3500);
-  }
+/** Show or hide the floating controls in full screen. They stay while the clock is stopped. */
+function showOverlay(on) {
+  appEl.classList.toggle('overlay-on', on);
+  clearTimeout(overlayTimer);
+  if (on && engine.running()) overlayTimer = setTimeout(() => !overlayOpen() && showOverlay(false), 3200);
 }
 
+/** Outside full screen: fade the buttons, then go full screen after a few idle seconds. */
+function scheduleAuto() {
+  clearTimeout(hideTimer);
+  clearTimeout(fullTimer);
+  if (!S().autoHide || suppressAuto || !isModeTab() || !engine.running() || isFull()) return;
+  hideTimer = setTimeout(() => {
+    if (!isModeTab() || !engine.running() || overlayOpen()) return;
+    appEl.classList.add('chrome-hidden');
+    fullTimer = setTimeout(() => appEl.classList.contains('chrome-hidden') && setImmersive(true), 450);
+  }, 3500);
+}
+
+function poke() {
+  if (isFull()) {
+    if (!isModeTab()) setImmersive(false);
+    else showOverlay(true);
+    return;
+  }
+  appEl.classList.remove('chrome-hidden');
+  scheduleAuto();
+}
+
+function toggleFull() {
+  haptic(6);
+  if (isFull()) {
+    suppressAuto = true;
+    setImmersive(false);
+    scheduleAuto();
+  } else {
+    setImmersive(true);
+    showOverlay(true);
+  }
+}
+fullBtn.addEventListener('click', toggleFull);
+
 appEl.addEventListener('pointerdown', (e) => {
+  swallowClick = false;
+  if (isFull()) {
+    const onControl = e.target.closest('.topbar button, .controls');
+    if (!appEl.classList.contains('overlay-on')) {
+      swallowClick = true; // first tap only reveals the controls
+      showOverlay(true);
+    } else if (!onControl) {
+      swallowClick = true; // tap on the clock hides them again
+      showOverlay(false);
+    } else showOverlay(true);
+    return;
+  }
   swallowClick = appEl.classList.contains('chrome-hidden') && !e.target.closest('.controls');
   poke();
 }, true);
@@ -414,7 +468,13 @@ appEl.addEventListener('click', (e) => {
   e.stopPropagation();
   e.preventDefault();
 }, true);
-addEventListener('mousemove', () => appEl.classList.contains('chrome-hidden') && poke());
+// Real mouse movement only: phones send a fake mouse event after every tap, which would
+// otherwise re-show the controls a tap just hid.
+addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  if (isFull()) showOverlay(true);
+  else if (appEl.classList.contains('chrome-hidden')) poke();
+});
 
 /* ---------- keep the screen awake while the app is open ---------- */
 
@@ -498,5 +558,8 @@ applyAll();
 if (DEMO && new URLSearchParams(location.search).has('scroll')) {
   setTimeout(() => ($('.view-home').scrollTop = $('.home-bento').offsetTop - 14), 400);
 }
+// Demo only: ?demo&tap shows the full-screen controls once full screen has kicked in.
+if (DEMO && new URLSearchParams(location.search).has('tap')) setTimeout(() => isFull() && showOverlay(true), 5500);
+if (DEMO && new URLSearchParams(location.search).has('settings')) setTimeout(openSettings, 300);
 setInterval(frame, 150);
 initPWA();

@@ -1,9 +1,8 @@
 // Home: the current time as a big flip clock filling about 70% of the screen, and below
 // it a card grid with the clock you're running, today's goals, streaks and trends.
 import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, streak, bestStreak, recentSessions, sessionDur, sessionEnd } from './store.js';
-import { fontById } from './config.js';
 import * as engine from './engine.js';
-import { FlipClock, fontMetrics, sizeCards } from './flip.js';
+import { makeFace } from './faces.js';
 import { icon } from './ui.js';
 import { openSessionEditor } from './sheets.js';
 import { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } from './util.js';
@@ -64,7 +63,7 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
   const sub = root.querySelector('.home-clock-sub');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
-  const clock = new FlipClock(clockEl);
+  let face = makeFace(clockEl, data.settings.face);
   let minuteKey = '';
   let chartW = 0;
 
@@ -82,28 +81,9 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
     const landscape = document.getElementById('app').classList.contains('landscape');
     const heroH = Math.round(clamp(innerHeight * HERO_SHARE, 240, Math.max(240, root.clientHeight - 40)));
     hero.style.height = `${heroH}px`;
-    clockEl.style.flexDirection = landscape ? 'row' : 'column';
-    const n = Math.max(2, clock.cards.length);
     const W = clockEl.clientWidth;
     const H = clockEl.clientHeight;
-    if (W && H) {
-      let cw;
-      let ch;
-      let gap;
-      if (landscape) {
-        gap = clamp(W * 0.02, 8, 20);
-        cw = (W - gap * (n - 1)) / n;
-        ch = Math.min(H, cw);
-        cw = Math.min(cw, ch * 1.35);
-      } else {
-        gap = clamp(H * 0.025, 8, 16);
-        ch = (H - gap * (n - 1)) / n;
-        cw = Math.min(W, ch * 2.2);
-        ch = Math.min(ch, cw);
-      }
-      ch = Math.floor(ch / 2) * 2;
-      sizeCards(clockEl, { cw: Math.floor(cw), ch, gap: Math.round(gap) }, fontMetrics(fontById(data.settings.font)), data.settings);
-    }
+    if (W && H) face.fit({ W, H, row: landscape, stretch: true });
     const w = bento.clientWidth;
     if (w && w !== chartW) drawCharts();
   }
@@ -356,11 +336,13 @@ export function mountHome(root, { goTab, openSettings, togglePlay, visible }) {
   }
 
   function tick(now = Date.now(), animate = true) {
+    if (face.type !== data.settings.face) face = makeFace(clockEl, data.settings.face);
     const ds = digits(now);
-    const countChanged = ds.length !== clock.cards.length;
-    clock.render(ds, animate && !countChanged && data.settings.flip);
-    if (countChanged) fit();
+    const countChanged = ds.length !== face.count;
     const d = new Date(now);
+    const label = is24() ? d.toLocaleDateString([], { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
+    face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label });
+    if (countChanged) fit();
     const mk = `${d.getHours()}:${d.getMinutes()}`;
     if (mk !== minuteKey) {
       minuteKey = mk;

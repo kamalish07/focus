@@ -1,7 +1,7 @@
 import { data, save, saveSoon, emit, on, replaceAll, resetAll, catById, dayKey } from './store.js';
 import { THEMES, FONTS, SOUNDS, APP_VERSION, themeColors, fontById } from './config.js';
 import { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } from './ui.js';
-import { FlipClock, fontMetrics, sizeCards } from './flip.js';
+import { makeFace, FACES } from './faces.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as pwa from './pwa.js';
@@ -77,6 +77,15 @@ export function openSettings() {
     const p = s.pomo;
     return `
       <div class="preview"><div class="clock preview-clock"></div></div>
+
+      ${group(
+        'Clock style',
+        `<div class="face-tiles">${FACES.map(
+          ([id, name]) =>
+            `<button class="face-tile" data-face="${id}" aria-pressed="${s.face === id}"><span class="clock face-mini"></span><span class="ft-name">${esc(name)}</span></button>`
+        ).join('')}</div>`,
+        'pad'
+      )}
 
       ${group('Theme', `<div class="themes">${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name)).join('')}${themeTile('custom', s.custom, 'Custom')}</div>`, 'pad')}
       ${group(
@@ -175,23 +184,43 @@ export function openSettings() {
 
   function mountPreview() {
     const el = root.querySelector('.preview-clock');
-    const mini = new FlipClock(el);
+    let face = null;
     const size = () => {
-      const W = Math.min(el.parentElement.clientWidth, 400);
-      const gap = Math.round(W * 0.03);
-      const cw = Math.floor((W - gap) / 2);
-      sizeCards(el, { cw, ch: Math.floor(cw * 0.82), gap }, fontMetrics(fontById(data.settings.font)), data.settings);
+      const W = Math.min(el.parentElement.clientWidth, 420);
+      el.style.width = `${W}px`;
+      el.style.height = `${Math.round(W * (face?.type === 'ring' ? 0.62 : 0.44))}px`;
+      face?.fit({ W, H: el.clientHeight, row: true, stretch: false });
     };
     const draw = (animate) => {
-      const [, m, sec] = hms(engine.displayMs(), engine.isCountdown());
-      mini.render([pad(m), pad(sec)], animate && data.settings.flip);
+      if (face?.type !== data.settings.face) {
+        face = makeFace(el, data.settings.face);
+        draw(false);
+        size();
+        return;
+      }
+      const ms = engine.displayMs();
+      const [, m, sec] = hms(ms, engine.isCountdown());
+      face.render([pad(m), pad(sec)], { animate, running: true, progress: (ms % 60000) / 60000, label: 'Preview' });
     };
-    size();
     draw(false);
     clearInterval(iv);
     iv = setInterval(() => draw(true), 250);
     offFit?.();
-    offFit = on('fit', size);
+    offFit = on('fit', () => {
+      size();
+      drawFaceTiles(); // re-measure once web fonts have loaded
+    });
+    drawFaceTiles();
+  }
+
+  /** Each style tile shows a real, tiny version of that clock face. */
+  function drawFaceTiles() {
+    for (const tile of root.querySelectorAll('.face-tile')) {
+      const el = tile.querySelector('.face-mini');
+      const f = makeFace(el, tile.dataset.face);
+      f.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '' });
+      f.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
+    }
   }
 
   function render() {
@@ -248,6 +277,12 @@ export function openSettings() {
     if (th) {
       s.theme = th.dataset.theme;
       refreshThemeUI();
+      return changed();
+    }
+    const fc = e.target.closest('.face-tile');
+    if (fc) {
+      s.face = fc.dataset.face;
+      root.querySelectorAll('.face-tile').forEach((b) => b.setAttribute('aria-pressed', String(b === fc)));
       return changed();
     }
     const ft = e.target.closest('[data-font]');

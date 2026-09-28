@@ -6,6 +6,7 @@ const KEY = 'focus.v1';
 export const DEFAULT_SETTINGS = {
   theme: 'classic',
   custom: { bg: '#000000', card: '#121212', digit: '#b3b3b3', accent: '#d4e157' },
+  face: 'flip', // flip | minimal | led | nixie | ring
   font: 'barlow',
   digitScale: 1,
   radius: 0.09,
@@ -107,6 +108,8 @@ export const DEMO = new URLSearchParams(location.search).has('demo');
 function demoData() {
   const d = defaults();
   Object.assign(d.settings, { seenTip: true, askedNotif: true });
+  const face = new URLSearchParams(location.search).get('face');
+  if (face) d.settings.face = face;
   d.cats = [
     { id: 'study', name: 'Study', color: PALETTE[0], goal: 180 },
     { id: 'math', name: 'Math', color: PALETTE[1], goal: 60 },
