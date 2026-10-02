@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.10.1';
+const APP_VERSION = '1.10.2';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -416,17 +416,20 @@ function setTabScope(which) {
   tabScope = which;
   return before !== lookScope() && !!data.settings.homeLook;
 }
-/** Show `which` look while a page is open; returns the function that stops. */
+/** Show `which` look while a page is open; returns the function that stops. Restyles only if the look changes. */
 function pushScope(which) {
   const token = { which };
-  scopes.push(token);
-  emit('settings');
-  return () => {
-    const i = scopes.indexOf(token);
-    if (i < 0) return;
-    scopes.splice(i, 1);
-    emit('settings');
+  const changes = (fn) => {
+    const before = lookScope();
+    fn();
+    if (lookScope() !== before && data.settings.homeLook) emit('settings');
   };
+  changes(() => scopes.push(token));
+  return () =>
+    changes(() => {
+      const i = scopes.indexOf(token);
+      if (i >= 0) scopes.splice(i, 1);
+    });
 }
 
 /* ---------- events ---------- */
@@ -3711,22 +3714,60 @@ function themesHtml(which = 'main') {
   return `<div class="themes strip">${custom}${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name, L.theme)).join('')}</div>`;
 }
 
+/**
+ * Keeps mini clocks fitted to their boxes. The sizes come from a ResizeObserver, measured as part of
+ * the browser's normal layout, so a page full of tiles costs one layout instead of one per tile.
+ */
+function miniFitter() {
+  const fit = (el) => el._size && el._face?.fit({ W: el._size[0], H: el._size[1], row: true, stretch: false });
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const { width, height } = e.contentRect;
+      if (!width || !height) continue;
+      e.target._size = [width, height];
+      fit(e.target);
+    }
+  });
+  return {
+    add: (el) => ro.observe(el),
+    refitAll: (container, sel) => container.isConnected && container.querySelectorAll(sel).forEach(fit),
+    stop: () => ro.disconnect(),
+  };
+}
+
+/**
+ * Runs fn over items a few per frame (about 6 ms of work each), starting on the next frame. A sheet
+ * full of detailed mini clocks then slides in at once and fills in, instead of stalling first.
+ */
+function eachFrame(items, fn, budget = 6) {
+  let i = 0;
+  let raf = 0;
+  const step = () => {
+    const t0 = performance.now();
+    do fn(items[i++]);
+    while (i < items.length && performance.now() - t0 < budget);
+    if (i < items.length) raf = requestAnimationFrame(step);
+  };
+  if (items.length) raf = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(raf);
+}
+
 /** Fills each template tile with a real mini clock and keeps it fitted. Returns a cleanup function. */
 function drawTemplates(container) {
-  const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
-  const ro = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
-  for (const tile of container.querySelectorAll('.tpl')) {
-    const t = TEMPLATES.find((x) => x.id === tile.dataset.tpl);
-    const look = templateLook(t);
+  const fitter = miniFitter();
+  const stop = eachFrame([...container.querySelectorAll('.tpl')], (tile) => {
+    if (!tile.isConnected) return;
+    const look = templateLook(TEMPLATES.find((x) => x.id === tile.dataset.tpl));
     const el = tile.querySelector('.tpl-mini');
     el._face = makeFace(el, look.face, { font: look.font, settings: { ...data.settings, ...look } });
     el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ...SAMPLE });
-    fitMini(el);
-    ro.observe(el);
-  }
-  const redraw = () => container.isConnected && container.querySelectorAll('.tpl-mini').forEach(fitMini);
-  document.fonts?.ready.then(redraw);
-  return () => ro.disconnect();
+    fitter.add(el);
+  });
+  document.fonts?.ready.then(() => fitter.refitAll(container, '.tpl-mini'));
+  return () => {
+    stop();
+    fitter.stop();
+  };
 }
 
 function markTemplates(container, which = 'main') {
@@ -3753,10 +3794,13 @@ function looksPanel(box, { which = 'main', onMore, onHome, onApply } = {}) {
     box.innerHTML = `${templatesHtml(featuredTemplates(which), 'featured', which)}${moreLooksHtml()}${homeCard}
       <h3 class="looks-label">Theme</h3>${themesHtml(which)}`;
     cleanup = drawTemplates(box);
-    // Bring the chosen theme into view within its row (without scrolling the page).
-    const strip = box.querySelector('.themes');
-    const sel = strip.querySelector('[aria-pressed="true"]');
-    if (sel) strip.scrollLeft += sel.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - sel.offsetWidth) / 2;
+    // Bring the chosen theme into view within its row (without scrolling the page). Measured on the
+    // next frame, once the page has been laid out anyway, so it doesn't force an extra layout now.
+    requestAnimationFrame(() => {
+      const strip = box.querySelector('.themes');
+      const sel = strip?.querySelector('[aria-pressed="true"]');
+      if (sel) strip.scrollLeft += sel.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - sel.offsetWidth) / 2;
+    });
   }
   box.addEventListener('click', (e) => {
     const tpl = e.target.closest('[data-tpl]');
@@ -3849,7 +3893,7 @@ function mountPreview(el, { which = 'main' } = {}) {
     offFit();
   };
 }
-return { applyTemplate, setLook, setHomeOwnLook, featuredTemplates, templatesHtml, moreLooksHtml, homeLookHtml, themesHtml, drawTemplates, markTemplates, markThemes, looksPanel, openLooks, mountPreview };
+return { applyTemplate, setLook, setHomeOwnLook, featuredTemplates, templatesHtml, moreLooksHtml, homeLookHtml, themesHtml, miniFitter, eachFrame, drawTemplates, markTemplates, markThemes, looksPanel, openLooks, mountPreview };
 })();
 
 // ---------- customize.js ----------
@@ -3861,7 +3905,7 @@ const { data, saveSoon, emit, on, lookOf, lookTarget, pushScope } = __m.store;
 const { FONTS, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } = __m.config;
 const { sheet, switchEl, segEl, bindControls, haptic } = __m.ui;
 const { makeFace, FACES } = __m.faces;
-const { templatesHtml, drawTemplates, markTemplates, markThemes, themesHtml, homeLookHtml, applyTemplate, setLook, setHomeOwnLook, mountPreview } = __m.looks;
+const { templatesHtml, drawTemplates, markTemplates, markThemes, themesHtml, homeLookHtml, applyTemplate, setLook, setHomeOwnLook, mountPreview, miniFitter, eachFrame } = __m.looks;
 const { esc, getPath, setPath } = __m.util;
 
 const group = (title, inner, cls = '') =>
@@ -3889,7 +3933,8 @@ function openCustomize({ which = 'main', onClose } = {}) {
     cls: 'customize-page',
     body: '<div class="customize"></div>',
     onClose: () => {
-      tileRO?.disconnect();
+      stopTiles?.();
+      tileRO?.stop();
       tplCleanup?.();
       previewCleanup?.();
       offFit?.();
@@ -3983,17 +4028,18 @@ function openCustomize({ which = 'main', onClose } = {}) {
   }
 
   /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
+  let stopTiles = null;
   function drawFaceTiles() {
-    tileRO?.disconnect();
-    const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
-    tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
-    for (const tile of root.querySelectorAll('.face-tile')) {
+    stopTiles?.();
+    tileRO?.stop();
+    const fitter = (tileRO = miniFitter());
+    stopTiles = eachFrame([...root.querySelectorAll('.face-tile')], (tile) => {
+      if (!tile.isConnected) return;
       const el = tile.querySelector('.face-mini');
       el._face = makeFace(el, tile.dataset.face, { settings: L });
       el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
-      fitMini(el);
-      tileRO.observe(el);
-    }
+      fitter.add(el);
+    });
   }
 
   function render() {
@@ -4111,7 +4157,7 @@ function openCustomize({ which = 'main', onClose } = {}) {
   });
 
   render();
-  offFit = on('fit', drawFaceTiles);
+  offFit = on('fit', () => tileRO?.refitAll(root, '.face-mini')); // re-fit only; the tiles themselves don't change
 }
 return { openCustomize };
 })();
@@ -4870,7 +4916,6 @@ document.addEventListener('keydown', (e) => {
 let hideTimer = 0;
 let fullTimer = 0;
 let overlayTimer = 0;
-let sizingTimer = 0;
 let swallowClick = false;
 let suppressAuto = false; // you left full screen yourself: don't re-enter until the next start
 
@@ -4887,17 +4932,16 @@ function syncFullButton() {
 
 function setImmersive(on) {
   if (isFull() === on) return;
-  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the face growing/shrinking
   appEl.classList.remove('chrome-hidden');
   appEl.classList.toggle('immersive', on);
   if (!on) appEl.classList.remove('overlay-on');
   syncFullButton();
   fit();
-  clearTimeout(sizingTimer);
-  sizingTimer = setTimeout(() => {
-    clockEl.classList.remove('sizing');
-    for (const a of clockEl.getAnimations()) if (a.transitionProperty) a.finish();
-  }, 600);
+  // The clock jumps to its new size at once and settles in with a fade and a slight zoom:
+  // opacity and transform only, so the phone's GPU does it without re-laying out every frame.
+  if (!document.hidden && !reduceMotion.matches) {
+    clockEl.animate([{ opacity: 0.25, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 360, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+  }
 }
 
 /** Show or hide the floating controls in full screen. They stay while the clock is stopped. */

@@ -5,7 +5,7 @@ import { data, saveSoon, emit, on, lookOf, lookTarget, pushScope } from './store
 import { FONTS, FACE_COLORS, AURORAS, LOOK_KEYS, themeColors } from './config.js';
 import { sheet, switchEl, segEl, bindControls, haptic } from './ui.js';
 import { makeFace, FACES } from './faces.js';
-import { templatesHtml, drawTemplates, markTemplates, markThemes, themesHtml, homeLookHtml, applyTemplate, setLook, setHomeOwnLook, mountPreview } from './looks.js';
+import { templatesHtml, drawTemplates, markTemplates, markThemes, themesHtml, homeLookHtml, applyTemplate, setLook, setHomeOwnLook, mountPreview, miniFitter, eachFrame } from './looks.js';
 import { esc, getPath, setPath } from './util.js';
 
 const group = (title, inner, cls = '') =>
@@ -33,7 +33,8 @@ export function openCustomize({ which = 'main', onClose } = {}) {
     cls: 'customize-page',
     body: '<div class="customize"></div>',
     onClose: () => {
-      tileRO?.disconnect();
+      stopTiles?.();
+      tileRO?.stop();
       tplCleanup?.();
       previewCleanup?.();
       offFit?.();
@@ -127,17 +128,18 @@ export function openCustomize({ which = 'main', onClose } = {}) {
   }
 
   /** Each style tile shows a real, tiny version of that clock face, re-fitted whenever the tile resizes. */
+  let stopTiles = null;
   function drawFaceTiles() {
-    tileRO?.disconnect();
-    const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
-    tileRO = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
-    for (const tile of root.querySelectorAll('.face-tile')) {
+    stopTiles?.();
+    tileRO?.stop();
+    const fitter = (tileRO = miniFitter());
+    stopTiles = eachFrame([...root.querySelectorAll('.face-tile')], (tile) => {
+      if (!tile.isConnected) return;
       const el = tile.querySelector('.face-mini');
       el._face = makeFace(el, tile.dataset.face, { settings: L });
       el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ms: 754000, date: new Date(2020, 0, 1, 10, 9, 34) });
-      fitMini(el);
-      tileRO.observe(el);
-    }
+      fitter.add(el);
+    });
   }
 
   function render() {
@@ -255,5 +257,5 @@ export function openCustomize({ which = 'main', onClose } = {}) {
   });
 
   render();
-  offFit = on('fit', drawFaceTiles);
+  offFit = on('fit', () => tileRO?.refitAll(root, '.face-mini')); // re-fit only; the tiles themselves don't change
 }

@@ -219,17 +219,20 @@ export function setTabScope(which) {
   tabScope = which;
   return before !== lookScope() && !!data.settings.homeLook;
 }
-/** Show `which` look while a page is open; returns the function that stops. */
+/** Show `which` look while a page is open; returns the function that stops. Restyles only if the look changes. */
 export function pushScope(which) {
   const token = { which };
-  scopes.push(token);
-  emit('settings');
-  return () => {
-    const i = scopes.indexOf(token);
-    if (i < 0) return;
-    scopes.splice(i, 1);
-    emit('settings');
+  const changes = (fn) => {
+    const before = lookScope();
+    fn();
+    if (lookScope() !== before && data.settings.homeLook) emit('settings');
   };
+  changes(() => scopes.push(token));
+  return () =>
+    changes(() => {
+      const i = scopes.indexOf(token);
+      if (i >= 0) scopes.splice(i, 1);
+    });
 }
 
 /* ---------- events ---------- */

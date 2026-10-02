@@ -125,7 +125,7 @@
   font: 800 12px/1 var(--ui-font);
 }
 /* The tile clips; the mini clock itself doesn't, so glows fade out naturally instead of hitting a hard edge. */
-.tpl-mini { flex: none; width: 100%; height: 80px; pointer-events: none; overflow: visible; contain: size; cursor: inherit; }
+.tpl-mini { flex: none; width: 100%; height: 80px; pointer-events: none; overflow: visible; contain: size layout style; cursor: inherit; }
 .tpl-name { font-size: 13px; font-weight: 650; color: var(--digit); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* The simple looks panel: four templates, a way into everything else, then the theme */

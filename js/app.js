@@ -437,7 +437,6 @@ document.addEventListener('keydown', (e) => {
 let hideTimer = 0;
 let fullTimer = 0;
 let overlayTimer = 0;
-let sizingTimer = 0;
 let swallowClick = false;
 let suppressAuto = false; // you left full screen yourself: don't re-enter until the next start
 
@@ -454,17 +453,16 @@ function syncFullButton() {
 
 function setImmersive(on) {
   if (isFull() === on) return;
-  if (!document.hidden && !reduceMotion.matches) clockEl.classList.add('sizing'); // animate the face growing/shrinking
   appEl.classList.remove('chrome-hidden');
   appEl.classList.toggle('immersive', on);
   if (!on) appEl.classList.remove('overlay-on');
   syncFullButton();
   fit();
-  clearTimeout(sizingTimer);
-  sizingTimer = setTimeout(() => {
-    clockEl.classList.remove('sizing');
-    for (const a of clockEl.getAnimations()) if (a.transitionProperty) a.finish();
-  }, 600);
+  // The clock jumps to its new size at once and settles in with a fade and a slight zoom:
+  // opacity and transform only, so the phone's GPU does it without re-laying out every frame.
+  if (!document.hidden && !reduceMotion.matches) {
+    clockEl.animate([{ opacity: 0.25, transform: 'scale(.94)' }, { opacity: 1, transform: 'none' }], { duration: 360, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+  }
 }
 
 /** Show or hide the floating controls in full screen. They stay while the clock is stopped. */

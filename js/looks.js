@@ -113,22 +113,60 @@ export function themesHtml(which = 'main') {
   return `<div class="themes strip">${custom}${Object.entries(THEMES).map(([id, t]) => themeTile(id, t, t.name, L.theme)).join('')}</div>`;
 }
 
+/**
+ * Keeps mini clocks fitted to their boxes. The sizes come from a ResizeObserver, measured as part of
+ * the browser's normal layout, so a page full of tiles costs one layout instead of one per tile.
+ */
+export function miniFitter() {
+  const fit = (el) => el._size && el._face?.fit({ W: el._size[0], H: el._size[1], row: true, stretch: false });
+  const ro = new ResizeObserver((entries) => {
+    for (const e of entries) {
+      const { width, height } = e.contentRect;
+      if (!width || !height) continue;
+      e.target._size = [width, height];
+      fit(e.target);
+    }
+  });
+  return {
+    add: (el) => ro.observe(el),
+    refitAll: (container, sel) => container.isConnected && container.querySelectorAll(sel).forEach(fit),
+    stop: () => ro.disconnect(),
+  };
+}
+
+/**
+ * Runs fn over items a few per frame (about 6 ms of work each), starting on the next frame. A sheet
+ * full of detailed mini clocks then slides in at once and fills in, instead of stalling first.
+ */
+export function eachFrame(items, fn, budget = 6) {
+  let i = 0;
+  let raf = 0;
+  const step = () => {
+    const t0 = performance.now();
+    do fn(items[i++]);
+    while (i < items.length && performance.now() - t0 < budget);
+    if (i < items.length) raf = requestAnimationFrame(step);
+  };
+  if (items.length) raf = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(raf);
+}
+
 /** Fills each template tile with a real mini clock and keeps it fitted. Returns a cleanup function. */
 export function drawTemplates(container) {
-  const fitMini = (el) => el.clientWidth && el._face?.fit({ W: el.clientWidth, H: el.clientHeight, row: true, stretch: false });
-  const ro = new ResizeObserver((entries) => entries.forEach((e) => fitMini(e.target)));
-  for (const tile of container.querySelectorAll('.tpl')) {
-    const t = TEMPLATES.find((x) => x.id === tile.dataset.tpl);
-    const look = templateLook(t);
+  const fitter = miniFitter();
+  const stop = eachFrame([...container.querySelectorAll('.tpl')], (tile) => {
+    if (!tile.isConnected) return;
+    const look = templateLook(TEMPLATES.find((x) => x.id === tile.dataset.tpl));
     const el = tile.querySelector('.tpl-mini');
     el._face = makeFace(el, look.face, { font: look.font, settings: { ...data.settings, ...look } });
     el._face.render(['12', '34'], { animate: false, running: false, progress: 0.62, label: '', ...SAMPLE });
-    fitMini(el);
-    ro.observe(el);
-  }
-  const redraw = () => container.isConnected && container.querySelectorAll('.tpl-mini').forEach(fitMini);
-  document.fonts?.ready.then(redraw);
-  return () => ro.disconnect();
+    fitter.add(el);
+  });
+  document.fonts?.ready.then(() => fitter.refitAll(container, '.tpl-mini'));
+  return () => {
+    stop();
+    fitter.stop();
+  };
 }
 
 export function markTemplates(container, which = 'main') {
@@ -155,10 +193,13 @@ export function looksPanel(box, { which = 'main', onMore, onHome, onApply } = {}
     box.innerHTML = `${templatesHtml(featuredTemplates(which), 'featured', which)}${moreLooksHtml()}${homeCard}
       <h3 class="looks-label">Theme</h3>${themesHtml(which)}`;
     cleanup = drawTemplates(box);
-    // Bring the chosen theme into view within its row (without scrolling the page).
-    const strip = box.querySelector('.themes');
-    const sel = strip.querySelector('[aria-pressed="true"]');
-    if (sel) strip.scrollLeft += sel.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - sel.offsetWidth) / 2;
+    // Bring the chosen theme into view within its row (without scrolling the page). Measured on the
+    // next frame, once the page has been laid out anyway, so it doesn't force an extra layout now.
+    requestAnimationFrame(() => {
+      const strip = box.querySelector('.themes');
+      const sel = strip?.querySelector('[aria-pressed="true"]');
+      if (sel) strip.scrollLeft += sel.getBoundingClientRect().left - strip.getBoundingClientRect().left - (strip.clientWidth - sel.offsetWidth) / 2;
+    });
   }
   box.addEventListener('click', (e) => {
     const tpl = e.target.closest('[data-tpl]');
