@@ -102,12 +102,22 @@ function setupHandlers() {
   act('nexttrack', () => lastMode === 'pomodoro' && engine.skip());
 }
 
+let lastState = '';
+/** Media Session calls cross into the browser, so only make them when something changed. */
+function setState(ms, state) {
+  if (state === lastState) return;
+  lastState = state;
+  ms.playbackState = state;
+}
+
 function lockScreen(m, now, isRunning) {
   if (!('mediaSession' in navigator)) return;
   const ms = navigator.mediaSession;
   if (!m) {
+    if (lastSig === 'none') return;
+    lastSig = 'none';
     ms.metadata = null;
-    ms.playbackState = 'none';
+    setState(ms, 'none');
     return;
   }
   const r = engine.runner(m);
@@ -139,7 +149,7 @@ function lockScreen(m, now, isRunning) {
     } catch {}
     lastPos = 0;
   }
-  ms.playbackState = isRunning ? 'playing' : 'paused';
+  setState(ms, isRunning ? 'playing' : 'paused');
   // The lock screen advances the position by itself; re-sync now and then.
   if (now - lastPos > 30000) {
     lastPos = now;
@@ -160,7 +170,7 @@ function alarmScreen() {
       album: 'Focus',
       artwork: [{ src: abs('icons/icon-512.png'), sizes: '512x512', type: 'image/png' }],
     });
-    navigator.mediaSession.playbackState = 'playing';
+    setState(navigator.mediaSession, 'playing');
   } catch {}
 }
 
@@ -201,7 +211,7 @@ export function sync(now = Date.now()) {
   if (s.bgSound !== 'off' && !m && now < holdUntil) alarmScreen();
   else if (s.bgSound !== 'off') lockScreen(shown, now, !!m);
   else if ('mediaSession' in navigator && navigator.mediaSession.metadata) lockScreen(null, now, false);
-  if (!m && !shown && now >= holdUntil) lastSig = '';
+  if (!m && !shown && now >= holdUntil && lastSig !== 'none') lastSig = '';
 }
 
 /** Call from a tap: browsers only allow audio to start after the user interacts. */

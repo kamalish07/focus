@@ -1,8 +1,8 @@
-import { data, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } from './store.js';
+import { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } from './store.js';
 import { icon } from './ui.js';
 import { openSessionEditor, openCategoryEditor, deleteCategory } from './sheets.js';
 import * as engine from './engine.js';
-import { esc, fmtDur, fmtTime, clamp, MIN, HOUR } from './util.js';
+import { esc, fmtDur, fmtTime, fmtDate, clamp, MIN, HOUR } from './util.js';
 
 const MODE_ICON = { stopwatch: 'stopwatch', timer: 'timer', pomodoro: 'pomodoro', manual: 'manual' };
 const MODE_NAME = { stopwatch: 'Stopwatch', timer: 'Timer', pomodoro: 'Pomodoro', manual: 'Added manually' };
@@ -10,7 +10,7 @@ const STEPS_MIN = [5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600,
 
 const niceStep = (max) => (STEPS_MIN.find((m) => max / (m * MIN) <= 4) || 24000) * MIN;
 const axisFmt = (ms) => (ms < HOUR ? `${Math.round(ms / MIN)}m` : `${+(ms / HOUR).toFixed(1)}h`);
-const fmtDay = (k, opts) => keyDate(k).toLocaleDateString([], opts);
+const fmtDay = (k, opts) => fmtDate(keyDate(k), opts);
 
 /** Renders the Statistics tab into `root`. Call refresh() whenever the tab is shown. */
 export function mountStats(root, { visible = () => true } = {}) {
@@ -36,7 +36,7 @@ export function mountStats(root, { visible = () => true } = {}) {
     const cats = pickCats(dayData(k).cats);
     const d = keyDate(k);
     let short;
-    if (st.range === 'week') short = d.toLocaleDateString([], { weekday: n > 0 ? 'short' : 'narrow' });
+    if (st.range === 'week') short = fmtDate(d, { weekday: n > 0 ? 'short' : 'narrow' });
     else short = String(d.getDate());
     return {
       key: k,
@@ -83,8 +83,8 @@ export function mountStats(root, { visible = () => true } = {}) {
         total: sum(cats),
         isToday: mk.includes(t),
         future: mk[0] > t,
-        label: first.toLocaleDateString([], { month: 'long', year: 'numeric' }),
-        short: first.toLocaleDateString([], { month: root.clientWidth > 420 ? 'short' : 'narrow' }),
+        label: fmtDate(first, { month: 'long', year: 'numeric' }),
+        short: fmtDate(first, { month: root.clientWidth > 420 ? 'short' : 'narrow' }),
       };
     });
   }
@@ -94,10 +94,10 @@ export function mountStats(root, { visible = () => true } = {}) {
     const b = keyDate(keys[keys.length - 1]);
     const thisYear = new Date().getFullYear();
     if (st.range === 'year') return String(a.getFullYear());
-    if (st.range === 'month') return a.toLocaleDateString([], { month: 'long', year: 'numeric' });
+    if (st.range === 'month') return fmtDate(a, { month: 'long', year: 'numeric' });
     const withYear = b.getFullYear() !== thisYear ? { year: 'numeric' } : {};
-    const left = a.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    const right = b.toLocaleDateString([], a.getMonth() === b.getMonth() ? { day: 'numeric', ...withYear } : { month: 'short', day: 'numeric', ...withYear });
+    const left = fmtDate(a, { month: 'short', day: 'numeric' });
+    const right = fmtDate(b, a.getMonth() === b.getMonth() ? { day: 'numeric', ...withYear } : { month: 'short', day: 'numeric', ...withYear });
     return `${left} to ${right}`;
   }
 
@@ -360,9 +360,14 @@ export function mountStats(root, { visible = () => true } = {}) {
   on('change', () => visible() && render());
   setInterval(() => visible() && engine.active() && render(), 30000);
 
+  let shownKey = '';
   return {
+    /** Called when the tab is shown: redraws only if the data, the minute or the width changed. */
     refresh() {
       if (!visible()) return;
+      const key = `${dataRev()}|${Math.floor(Date.now() / MIN)}|${root.clientWidth}`;
+      if (key === shownKey && root.firstChild) return;
+      shownKey = key;
       lastW = root.clientWidth;
       render();
     },

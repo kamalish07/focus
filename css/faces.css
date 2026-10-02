@@ -41,7 +41,7 @@
   background-size: 300% 100%;
   -webkit-background-clip: text; background-clip: text;
   color: transparent;
-  animation: auShift 14s linear infinite;
+  animation: auShift 14s steps(112) infinite; /* repainting gradient text: ~8 times a second, not 60 */
 }
 .mn.aurora .mn-sep { color: color-mix(in srgb, var(--a2) 55%, transparent); }
 @keyframes auShift { to { background-position: 300% 0; } }
@@ -224,9 +224,6 @@
 .live-card:active { transform: scale(.985); }
 .face-tile:active, .theme-tile:active, .font-tile:active, .swatch:active, .pill:active { transform: scale(.95); }
 
-/* Tab changes cross-fade (View Transitions); the tab bar itself stays put. */
-.tabbar { view-transition-name: tabbar; }
-::view-transition-old(root), ::view-transition-new(root) { animation-duration: .22s; animation-timing-function: cubic-bezier(.2, .8, .2, 1); }
 
 /* ============ home: the clock fills the screen; the day's details rise in below ============ */
 .view-home { scroll-snap-type: y proximity; }

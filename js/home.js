@@ -1,14 +1,15 @@
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf } from './store.js';
+import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf, dataRev } from './store.js';
 import * as engine from './engine.js';
 import { makeFace, homeFaceType } from './faces.js';
 import { icon } from './ui.js';
 import { openSessionEditor, openGoalSheet } from './sheets.js';
-import { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } from './util.js';
+import { esc, fmtDur, fmtTime, fmtDate, pad, clamp, hms, MIN } from './util.js';
 
-/** 24-hour clock? Follows the phone unless set in Settings. */
-export const is24 = () => data.settings.clock24 ?? new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
+const PHONE_24 = new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
+/** 24-hour clock? Follows the phone unless set in Settings. (Called every frame, so the phone's choice is read once.) */
+export const is24 = () => data.settings.clock24 ?? PHONE_24;
 
 /** Home's clock reads Home's own look (or the timers' when Home matches them). */
 const HOME_CTX = { settings: () => lookOf('home') };
@@ -32,7 +33,7 @@ function dayLabel(ts, now) {
   const t = dayKey(now);
   if (k === t) return 'Today';
   if (k === addDays(t, -1)) return 'Yesterday';
-  return keyDate(k).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  return fmtDate(keyDate(k), { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }) {
@@ -87,7 +88,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
   function header(now) {
     const d = new Date(now);
     root.querySelector('.greet').textContent = greeting(d.getHours());
-    root.querySelector('.home-date').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+    root.querySelector('.home-date').textContent = fmtDate(d, { weekday: 'long', month: 'long', day: 'numeric' });
     const today = dayData(dayKey(now), now).total;
     // Ring and analog faces show AM/PM on the dial already.
     sub.textContent = is24() || ['ring', 'analog'].includes(face.type) ? '' : d.getHours() < 12 ? 'AM' : 'PM';
@@ -183,7 +184,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     const ws = weekStartKey(t);
     const list = Array.from({ length: 7 }, (_, i) => {
       const k = addDays(ws, i);
-      return { k, v: k <= t ? dayData(k, now).total : 0, today: k === t, label: keyDate(k).toLocaleDateString([], { weekday: 'narrow' }), long: keyDate(k).toLocaleDateString([], { weekday: 'long' }) };
+      return { k, v: k <= t ? dayData(k, now).total : 0, today: k === t, label: fmtDate(keyDate(k), { weekday: 'narrow' }), long: fmtDate(keyDate(k), { weekday: 'long' }) };
     });
     const goal = goalFor(null);
     const H = 140;
@@ -244,20 +245,20 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
       const d = keyDate(addDays(start, c * 7));
       if (d.getMonth() !== lastMonth) {
         if (c - lastLabelCol >= 3 && (c > 0 || d.getDate() <= 7)) {
-          g += `<text class="hm-label" x="${px(c)}" y="10">${esc(d.toLocaleDateString([], { month: 'short' }))}</text>`;
+          g += `<text class="hm-label" x="${px(c)}" y="10">${esc(fmtDate(d, { month: 'short' }))}</text>`;
           lastLabelCol = c;
         }
         lastMonth = d.getMonth();
       }
     }
     for (const r of [0, 2, 4]) {
-      g += `<text class="hm-label" x="0" y="${py(r) + cell - 3}">${esc(keyDate(addDays(start, r)).toLocaleDateString([], { weekday: 'narrow' }))}</text>`;
+      g += `<text class="hm-label" x="0" y="${py(r) + cell - 3}">${esc(fmtDate(keyDate(addDays(start, r)), { weekday: 'narrow' }))}</text>`;
     }
     let active = 0;
     for (const cl of cells) {
       const lv = level(cl.v);
       if (lv) active++;
-      const tip = `${keyDate(cl.k).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}: ${cl.v >= MIN ? fmtDur(cl.v) : 'no focus'}`;
+      const tip = `${fmtDate(keyDate(cl.k), { weekday: 'short', month: 'short', day: 'numeric' })}: ${cl.v >= MIN ? fmtDur(cl.v) : 'no focus'}`;
       g += `<rect x="${px(cl.c)}" y="${py(cl.r)}" width="${cell}" height="${cell}" rx="3" class="${cl.k === t ? 'hm-today' : ''}" style="fill:${HEAT[lv]}"><title>${esc(tip)}</title></rect>`;
     }
     const w = px(cols - 1) + cell + 1;
@@ -300,9 +301,14 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     }
   }
 
-  function refresh() {
+  let drawnKey = '';
+  /** Rebuilds the cards, but only when something they show has changed (data, the minute, the width). */
+  function refresh(force = false) {
     if (!visible()) return;
     const now = Date.now();
+    const key = `${dataRev()}|${Math.floor(now / MIN)}|${bento.clientWidth}|${data.settings.clock24}`;
+    if (!force && key === drawnKey) return;
+    drawnKey = key;
     const t = dayKey(now);
     const goal = goalFor(null);
     bento.innerHTML =
@@ -324,7 +330,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     const ds = digits(now);
     const countChanged = ds.length !== face.count;
     const d = new Date(now);
-    const label = is24() ? d.toLocaleDateString([], { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
+    const label = is24() ? fmtDate(d, { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
     face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label, date: d });
     if (countChanged) fit();
     const mk = `${d.getHours()}:${d.getMinutes()}`;

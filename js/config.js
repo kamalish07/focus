@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.10.0';
+export const APP_VERSION = '1.10.1';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 export const THEMES = {

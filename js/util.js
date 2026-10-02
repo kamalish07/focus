@@ -29,7 +29,16 @@ export function fmtDur(ms) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-export const fmtTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+// Intl formatters are slow to create (phones especially), so each set of options is made once.
+const fmts = new Map();
+export function dateFmt(opts) {
+  const key = JSON.stringify(opts);
+  let f = fmts.get(key);
+  if (!f) fmts.set(key, (f = new Intl.DateTimeFormat([], opts)));
+  return f;
+}
+export const fmtDate = (d, opts) => dateFmt(opts).format(d);
+export const fmtTime = (ts) => dateFmt({ hour: 'numeric', minute: '2-digit' }).format(ts);
 
 export function luminance(hex) {
   const n = parseInt(String(hex).replace('#', '').padEnd(6, '0').slice(0, 6), 16);

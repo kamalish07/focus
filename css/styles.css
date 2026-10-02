@@ -410,7 +410,7 @@ svg.i { width: 22px; height: 22px; display: block; flex: none; }
   font-family: 'Barlow Semi Condensed', system-ui, sans-serif; font-weight: 300;
   font-size: calc(var(--th, 66px) * .68); line-height: var(--th, 66px);
 }
-.nx-t span { position: absolute; inset: 0; text-align: center; color: color-mix(in srgb, var(--nxc) 9%, transparent); transition: color .12s, text-shadow .12s; }
+.nx-t span { position: absolute; inset: 0; text-align: center; color: color-mix(in srgb, var(--nxc) 9%, transparent); }
 .no-ghost .nx-t span:not(.on) { color: transparent; }
 .nx-t span.on {
   color: color-mix(in srgb, var(--nxc) 40%, #fff);

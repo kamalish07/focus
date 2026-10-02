@@ -246,9 +246,14 @@ export const emit = (evt, arg) => (listeners[evt] || []).slice().forEach((fn) =>
 /* ---------- persistence ---------- */
 
 let saveTimer = 0;
+let rev = 0;
+/** Goes up with every saved change, so views can tell when they need redrawing. */
+export const dataRev = () => rev;
+
 export function save() {
   clearTimeout(saveTimer);
   cache = null;
+  rev++;
   try {
     if (!DEMO) localStorage.setItem(KEY, JSON.stringify(data));
   } catch (e) {

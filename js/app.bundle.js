@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.10.1';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -151,7 +151,16 @@ function fmtDur(ms) {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-const fmtTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+// Intl formatters are slow to create (phones especially), so each set of options is made once.
+const fmts = new Map();
+function dateFmt(opts) {
+  const key = JSON.stringify(opts);
+  let f = fmts.get(key);
+  if (!f) fmts.set(key, (f = new Intl.DateTimeFormat([], opts)));
+  return f;
+}
+const fmtDate = (d, opts) => dateFmt(opts).format(d);
+const fmtTime = (ts) => dateFmt({ hour: 'numeric', minute: '2-digit' }).format(ts);
 
 function luminance(hex) {
   const n = parseInt(String(hex).replace('#', '').padEnd(6, '0').slice(0, 6), 16);
@@ -181,7 +190,7 @@ function downloadFile(name, text, type) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
-return { SEC, MIN, HOUR, $, $$, pad, clamp, uid, esc, hms, fmtDur, fmtTime, luminance, getPath, setPath, downloadFile };
+return { SEC, MIN, HOUR, $, $$, pad, clamp, uid, esc, hms, fmtDur, dateFmt, fmtDate, fmtTime, luminance, getPath, setPath, downloadFile };
 })();
 
 // ---------- store.js ----------
@@ -434,9 +443,14 @@ const emit = (evt, arg) => (listeners[evt] || []).slice().forEach((fn) => fn(arg
 /* ---------- persistence ---------- */
 
 let saveTimer = 0;
+let rev = 0;
+/** Goes up with every saved change, so views can tell when they need redrawing. */
+const dataRev = () => rev;
+
 function save() {
   clearTimeout(saveTimer);
   cache = null;
+  rev++;
   try {
     if (!DEMO) localStorage.setItem(KEY, JSON.stringify(data));
   } catch (e) {
@@ -654,7 +668,7 @@ function streak(catId = null, now = Date.now()) {
   }
   return n;
 }
-return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, copyLook, lookOf, lookTarget, lookScope, shownLook, setTabScope, pushScope, on, emit, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
+return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, copyLook, lookOf, lookTarget, lookScope, shownLook, setTabScope, pushScope, on, emit, dataRev, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
 })();
 
 // ---------- engine.js ----------
@@ -1182,12 +1196,22 @@ function setupHandlers() {
   act('nexttrack', () => lastMode === 'pomodoro' && engine.skip());
 }
 
+let lastState = '';
+/** Media Session calls cross into the browser, so only make them when something changed. */
+function setState(ms, state) {
+  if (state === lastState) return;
+  lastState = state;
+  ms.playbackState = state;
+}
+
 function lockScreen(m, now, isRunning) {
   if (!('mediaSession' in navigator)) return;
   const ms = navigator.mediaSession;
   if (!m) {
+    if (lastSig === 'none') return;
+    lastSig = 'none';
     ms.metadata = null;
-    ms.playbackState = 'none';
+    setState(ms, 'none');
     return;
   }
   const r = engine.runner(m);
@@ -1219,7 +1243,7 @@ function lockScreen(m, now, isRunning) {
     } catch {}
     lastPos = 0;
   }
-  ms.playbackState = isRunning ? 'playing' : 'paused';
+  setState(ms, isRunning ? 'playing' : 'paused');
   // The lock screen advances the position by itself; re-sync now and then.
   if (now - lastPos > 30000) {
     lastPos = now;
@@ -1240,7 +1264,7 @@ function alarmScreen() {
       album: 'Focus',
       artwork: [{ src: abs('icons/icon-512.png'), sizes: '512x512', type: 'image/png' }],
     });
-    navigator.mediaSession.playbackState = 'playing';
+    setState(navigator.mediaSession, 'playing');
   } catch {}
 }
 
@@ -1281,7 +1305,7 @@ function sync(now = Date.now()) {
   if (s.bgSound !== 'off' && !m && now < holdUntil) alarmScreen();
   else if (s.bgSound !== 'off') lockScreen(shown, now, !!m);
   else if ('mediaSession' in navigator && navigator.mediaSession.metadata) lockScreen(null, now, false);
-  if (!m && !shown && now >= holdUntil) lastSig = '';
+  if (!m && !shown && now >= holdUntil && lastSig !== 'none') lastSig = '';
 }
 
 /** Call from a tap: browsers only allow audio to start after the user interacts. */
@@ -2764,11 +2788,11 @@ return { openEditor, openGoalSheet, openCategories, deleteCategory, openCategory
 
 // ---------- stats.js ----------
 __m.stats = (() => {
-const { data, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } = __m.store;
+const { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } = __m.store;
 const { icon } = __m.ui;
 const { openSessionEditor, openCategoryEditor, deleteCategory } = __m.sheets;
 const engine = __m.engine;
-const { esc, fmtDur, fmtTime, clamp, MIN, HOUR } = __m.util;
+const { esc, fmtDur, fmtTime, fmtDate, clamp, MIN, HOUR } = __m.util;
 
 const MODE_ICON = { stopwatch: 'stopwatch', timer: 'timer', pomodoro: 'pomodoro', manual: 'manual' };
 const MODE_NAME = { stopwatch: 'Stopwatch', timer: 'Timer', pomodoro: 'Pomodoro', manual: 'Added manually' };
@@ -2776,7 +2800,7 @@ const STEPS_MIN = [5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600,
 
 const niceStep = (max) => (STEPS_MIN.find((m) => max / (m * MIN) <= 4) || 24000) * MIN;
 const axisFmt = (ms) => (ms < HOUR ? `${Math.round(ms / MIN)}m` : `${+(ms / HOUR).toFixed(1)}h`);
-const fmtDay = (k, opts) => keyDate(k).toLocaleDateString([], opts);
+const fmtDay = (k, opts) => fmtDate(keyDate(k), opts);
 
 /** Renders the Statistics tab into `root`. Call refresh() whenever the tab is shown. */
 function mountStats(root, { visible = () => true } = {}) {
@@ -2802,7 +2826,7 @@ function mountStats(root, { visible = () => true } = {}) {
     const cats = pickCats(dayData(k).cats);
     const d = keyDate(k);
     let short;
-    if (st.range === 'week') short = d.toLocaleDateString([], { weekday: n > 0 ? 'short' : 'narrow' });
+    if (st.range === 'week') short = fmtDate(d, { weekday: n > 0 ? 'short' : 'narrow' });
     else short = String(d.getDate());
     return {
       key: k,
@@ -2849,8 +2873,8 @@ function mountStats(root, { visible = () => true } = {}) {
         total: sum(cats),
         isToday: mk.includes(t),
         future: mk[0] > t,
-        label: first.toLocaleDateString([], { month: 'long', year: 'numeric' }),
-        short: first.toLocaleDateString([], { month: root.clientWidth > 420 ? 'short' : 'narrow' }),
+        label: fmtDate(first, { month: 'long', year: 'numeric' }),
+        short: fmtDate(first, { month: root.clientWidth > 420 ? 'short' : 'narrow' }),
       };
     });
   }
@@ -2860,10 +2884,10 @@ function mountStats(root, { visible = () => true } = {}) {
     const b = keyDate(keys[keys.length - 1]);
     const thisYear = new Date().getFullYear();
     if (st.range === 'year') return String(a.getFullYear());
-    if (st.range === 'month') return a.toLocaleDateString([], { month: 'long', year: 'numeric' });
+    if (st.range === 'month') return fmtDate(a, { month: 'long', year: 'numeric' });
     const withYear = b.getFullYear() !== thisYear ? { year: 'numeric' } : {};
-    const left = a.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    const right = b.toLocaleDateString([], a.getMonth() === b.getMonth() ? { day: 'numeric', ...withYear } : { month: 'short', day: 'numeric', ...withYear });
+    const left = fmtDate(a, { month: 'short', day: 'numeric' });
+    const right = fmtDate(b, a.getMonth() === b.getMonth() ? { day: 'numeric', ...withYear } : { month: 'short', day: 'numeric', ...withYear });
     return `${left} to ${right}`;
   }
 
@@ -3126,9 +3150,14 @@ function mountStats(root, { visible = () => true } = {}) {
   on('change', () => visible() && render());
   setInterval(() => visible() && engine.active() && render(), 30000);
 
+  let shownKey = '';
   return {
+    /** Called when the tab is shown: redraws only if the data, the minute or the width changed. */
     refresh() {
       if (!visible()) return;
+      const key = `${dataRev()}|${Math.floor(Date.now() / MIN)}|${root.clientWidth}`;
+      if (key === shownKey && root.firstChild) return;
+      shownKey = key;
       lastW = root.clientWidth;
       render();
     },
@@ -3141,15 +3170,16 @@ return { mountStats };
 __m.home = (() => {
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf } = __m.store;
+const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf, dataRev } = __m.store;
 const engine = __m.engine;
 const { makeFace, homeFaceType } = __m.faces;
 const { icon } = __m.ui;
 const { openSessionEditor, openGoalSheet } = __m.sheets;
-const { esc, fmtDur, fmtTime, pad, clamp, hms, MIN } = __m.util;
+const { esc, fmtDur, fmtTime, fmtDate, pad, clamp, hms, MIN } = __m.util;
 
-/** 24-hour clock? Follows the phone unless set in Settings. */
-const is24 = () => data.settings.clock24 ?? new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
+const PHONE_24 = new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
+/** 24-hour clock? Follows the phone unless set in Settings. (Called every frame, so the phone's choice is read once.) */
+const is24 = () => data.settings.clock24 ?? PHONE_24;
 
 /** Home's clock reads Home's own look (or the timers' when Home matches them). */
 const HOME_CTX = { settings: () => lookOf('home') };
@@ -3173,7 +3203,7 @@ function dayLabel(ts, now) {
   const t = dayKey(now);
   if (k === t) return 'Today';
   if (k === addDays(t, -1)) return 'Yesterday';
-  return keyDate(k).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  return fmtDate(keyDate(k), { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }) {
@@ -3228,7 +3258,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
   function header(now) {
     const d = new Date(now);
     root.querySelector('.greet').textContent = greeting(d.getHours());
-    root.querySelector('.home-date').textContent = d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+    root.querySelector('.home-date').textContent = fmtDate(d, { weekday: 'long', month: 'long', day: 'numeric' });
     const today = dayData(dayKey(now), now).total;
     // Ring and analog faces show AM/PM on the dial already.
     sub.textContent = is24() || ['ring', 'analog'].includes(face.type) ? '' : d.getHours() < 12 ? 'AM' : 'PM';
@@ -3324,7 +3354,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     const ws = weekStartKey(t);
     const list = Array.from({ length: 7 }, (_, i) => {
       const k = addDays(ws, i);
-      return { k, v: k <= t ? dayData(k, now).total : 0, today: k === t, label: keyDate(k).toLocaleDateString([], { weekday: 'narrow' }), long: keyDate(k).toLocaleDateString([], { weekday: 'long' }) };
+      return { k, v: k <= t ? dayData(k, now).total : 0, today: k === t, label: fmtDate(keyDate(k), { weekday: 'narrow' }), long: fmtDate(keyDate(k), { weekday: 'long' }) };
     });
     const goal = goalFor(null);
     const H = 140;
@@ -3385,20 +3415,20 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
       const d = keyDate(addDays(start, c * 7));
       if (d.getMonth() !== lastMonth) {
         if (c - lastLabelCol >= 3 && (c > 0 || d.getDate() <= 7)) {
-          g += `<text class="hm-label" x="${px(c)}" y="10">${esc(d.toLocaleDateString([], { month: 'short' }))}</text>`;
+          g += `<text class="hm-label" x="${px(c)}" y="10">${esc(fmtDate(d, { month: 'short' }))}</text>`;
           lastLabelCol = c;
         }
         lastMonth = d.getMonth();
       }
     }
     for (const r of [0, 2, 4]) {
-      g += `<text class="hm-label" x="0" y="${py(r) + cell - 3}">${esc(keyDate(addDays(start, r)).toLocaleDateString([], { weekday: 'narrow' }))}</text>`;
+      g += `<text class="hm-label" x="0" y="${py(r) + cell - 3}">${esc(fmtDate(keyDate(addDays(start, r)), { weekday: 'narrow' }))}</text>`;
     }
     let active = 0;
     for (const cl of cells) {
       const lv = level(cl.v);
       if (lv) active++;
-      const tip = `${keyDate(cl.k).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}: ${cl.v >= MIN ? fmtDur(cl.v) : 'no focus'}`;
+      const tip = `${fmtDate(keyDate(cl.k), { weekday: 'short', month: 'short', day: 'numeric' })}: ${cl.v >= MIN ? fmtDur(cl.v) : 'no focus'}`;
       g += `<rect x="${px(cl.c)}" y="${py(cl.r)}" width="${cell}" height="${cell}" rx="3" class="${cl.k === t ? 'hm-today' : ''}" style="fill:${HEAT[lv]}"><title>${esc(tip)}</title></rect>`;
     }
     const w = px(cols - 1) + cell + 1;
@@ -3441,9 +3471,14 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     }
   }
 
-  function refresh() {
+  let drawnKey = '';
+  /** Rebuilds the cards, but only when something they show has changed (data, the minute, the width). */
+  function refresh(force = false) {
     if (!visible()) return;
     const now = Date.now();
+    const key = `${dataRev()}|${Math.floor(now / MIN)}|${bento.clientWidth}|${data.settings.clock24}`;
+    if (!force && key === drawnKey) return;
+    drawnKey = key;
     const t = dayKey(now);
     const goal = goalFor(null);
     bento.innerHTML =
@@ -3465,7 +3500,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     const ds = digits(now);
     const countChanged = ds.length !== face.count;
     const d = new Date(now);
-    const label = is24() ? d.toLocaleDateString([], { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
+    const label = is24() ? fmtDate(d, { weekday: 'short' }) : d.getHours() < 12 ? 'AM' : 'PM';
     face.render(ds, { animate: animate && !countChanged, running: true, progress: (d.getSeconds() + d.getMilliseconds() / 1000) / 60, label, date: d });
     if (countChanged) fit();
     const mk = `${d.getHours()}:${d.getMinutes()}`;
@@ -4415,6 +4450,7 @@ const { initPWA, notify } = __m.pwa;
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
+const catDot = document.querySelector('#btn-cat .dot');
 const appEl = $('#app');
 const viewsEl = $('.views');
 const clockView = $('.view-clock');
@@ -4532,11 +4568,13 @@ function applyAll() {
 
 /* ---------- tabs ---------- */
 
-/** Tab changes cross-fade where the browser supports view transitions. */
+/** Tab changes: the new screen fades in (opacity only, so phones do it on the GPU). */
 function showTab(t) {
-  const animate = started && t !== tab && document.startViewTransition && !reduceMotion.matches && !document.hidden;
-  if (animate) document.startViewTransition(() => swapTab(t)).ready.catch(() => {}); // a skipped fade is fine
-  else swapTab(t);
+  const animate = started && t !== tab && !reduceMotion.matches && !document.hidden;
+  swapTab(t);
+  if (!animate) return;
+  const view = tab === 'home' ? $('.view-home') : tab === 'stats' ? $('.view-stats') : clockView;
+  view.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
 }
 
 function swapTab(t) {
@@ -4558,8 +4596,14 @@ function swapTab(t) {
   appEl.classList.remove('chrome-hidden', 'immersive', 'overlay-on');
   syncFullButton();
   suppressAuto = false;
-  if (restyle) applyAll();
-  else {
+  if (restyle) {
+    // Swap colours instantly (the screen fades in anyway); animating them restyles the whole page every frame.
+    const html = document.documentElement;
+    const anim = html.classList.contains('theme-anim');
+    html.classList.remove('theme-anim');
+    applyAll();
+    if (anim) requestAnimationFrame(() => requestAnimationFrame(() => html.classList.add('theme-anim')));
+  } else {
     fit();
     if (t === 'home') home.refresh();
     frame(true);
@@ -4638,7 +4682,10 @@ function renderClock(now, force) {
   clockEl.classList.toggle('done', !!r.done);
   clockView.classList.toggle('is-break', m === 'pomodoro' && r.phase !== 'focus');
 
-  $('#btn-cat .dot').style.setProperty('--c', cat.color);
+  if (catDot.dataset.c !== cat.color) {
+    catDot.dataset.c = cat.color;
+    catDot.style.setProperty('--c', cat.color);
+  }
   $('#btn-cat').classList.toggle('none', !!cat.none);
   setText($('#btn-cat .pill-name'), cat.name);
 
@@ -4662,7 +4709,10 @@ function renderClock(now, force) {
     const bar = progress.firstElementChild;
     const w = `${Math.min(100, (catToday / goal) * 100)}%`;
     if (bar.style.width !== w) bar.style.width = w;
-    bar.style.background = cat.color;
+    if (bar.dataset.c !== cat.color) {
+      bar.dataset.c = cat.color;
+      bar.style.background = cat.color;
+    }
   }
 }
 
@@ -4955,14 +5005,26 @@ on('runner', () => {
   bg.sync();
 });
 
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    fit();
-    frame(true);
-    if (tab === 'home') home.refresh();
+/**
+ * Back from the screen being off (or from another app): catch up in one cheap pass.
+ * Phones may pause the page mid-flip and still be resizing it just after unlocking.
+ */
+function onReturn() {
+  for (const a of document.getAnimations()) {
+    if (!a.effect?.target?.closest?.('.clock') || !Number.isFinite(a.effect.getComputedTiming().endTime)) continue;
+    try {
+      a.finish(); // land any half-turned flip card
+    } catch {}
   }
+  frame(true);
+  requestAnimationFrame(() => requestAnimationFrame(fit)); // once the page has its final size
+  if (tab === 'home') home.refresh();
+  bg.kick(); // the system may have paused the keep-awake track
   updateWakeLock();
-});
+}
+document.addEventListener('visibilitychange', () => (document.hidden ? updateWakeLock() : onReturn()));
+document.addEventListener('resume', onReturn); // the page was frozen in the background
+addEventListener('pageshow', (e) => e.persisted && onReturn());
 
 let fitTimer = 0;
 const refit = () => {
@@ -4974,7 +5036,7 @@ addEventListener('resize', refit);
 
 document.fonts?.addEventListener?.('loadingdone', () => {
   clearMetrics();
-  metrics = fontMetrics(fontById(S().font));
+  metrics = fontMetrics(fontById(L().font));
   fit();
 });
 $('#font-css')?.addEventListener('load', () => applyFont());

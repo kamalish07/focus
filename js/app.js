@@ -17,6 +17,7 @@ import { initPWA, notify } from './pwa.js';
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
+const catDot = document.querySelector('#btn-cat .dot');
 const appEl = $('#app');
 const viewsEl = $('.views');
 const clockView = $('.view-clock');
@@ -134,11 +135,13 @@ function applyAll() {
 
 /* ---------- tabs ---------- */
 
-/** Tab changes cross-fade where the browser supports view transitions. */
+/** Tab changes: the new screen fades in (opacity only, so phones do it on the GPU). */
 function showTab(t) {
-  const animate = started && t !== tab && document.startViewTransition && !reduceMotion.matches && !document.hidden;
-  if (animate) document.startViewTransition(() => swapTab(t)).ready.catch(() => {}); // a skipped fade is fine
-  else swapTab(t);
+  const animate = started && t !== tab && !reduceMotion.matches && !document.hidden;
+  swapTab(t);
+  if (!animate) return;
+  const view = tab === 'home' ? $('.view-home') : tab === 'stats' ? $('.view-stats') : clockView;
+  view.animate?.([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
 }
 
 function swapTab(t) {
@@ -160,8 +163,14 @@ function swapTab(t) {
   appEl.classList.remove('chrome-hidden', 'immersive', 'overlay-on');
   syncFullButton();
   suppressAuto = false;
-  if (restyle) applyAll();
-  else {
+  if (restyle) {
+    // Swap colours instantly (the screen fades in anyway); animating them restyles the whole page every frame.
+    const html = document.documentElement;
+    const anim = html.classList.contains('theme-anim');
+    html.classList.remove('theme-anim');
+    applyAll();
+    if (anim) requestAnimationFrame(() => requestAnimationFrame(() => html.classList.add('theme-anim')));
+  } else {
     fit();
     if (t === 'home') home.refresh();
     frame(true);
@@ -240,7 +249,10 @@ function renderClock(now, force) {
   clockEl.classList.toggle('done', !!r.done);
   clockView.classList.toggle('is-break', m === 'pomodoro' && r.phase !== 'focus');
 
-  $('#btn-cat .dot').style.setProperty('--c', cat.color);
+  if (catDot.dataset.c !== cat.color) {
+    catDot.dataset.c = cat.color;
+    catDot.style.setProperty('--c', cat.color);
+  }
   $('#btn-cat').classList.toggle('none', !!cat.none);
   setText($('#btn-cat .pill-name'), cat.name);
 
@@ -264,7 +276,10 @@ function renderClock(now, force) {
     const bar = progress.firstElementChild;
     const w = `${Math.min(100, (catToday / goal) * 100)}%`;
     if (bar.style.width !== w) bar.style.width = w;
-    bar.style.background = cat.color;
+    if (bar.dataset.c !== cat.color) {
+      bar.dataset.c = cat.color;
+      bar.style.background = cat.color;
+    }
   }
 }
 
@@ -557,14 +572,26 @@ on('runner', () => {
   bg.sync();
 });
 
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    fit();
-    frame(true);
-    if (tab === 'home') home.refresh();
+/**
+ * Back from the screen being off (or from another app): catch up in one cheap pass.
+ * Phones may pause the page mid-flip and still be resizing it just after unlocking.
+ */
+function onReturn() {
+  for (const a of document.getAnimations()) {
+    if (!a.effect?.target?.closest?.('.clock') || !Number.isFinite(a.effect.getComputedTiming().endTime)) continue;
+    try {
+      a.finish(); // land any half-turned flip card
+    } catch {}
   }
+  frame(true);
+  requestAnimationFrame(() => requestAnimationFrame(fit)); // once the page has its final size
+  if (tab === 'home') home.refresh();
+  bg.kick(); // the system may have paused the keep-awake track
   updateWakeLock();
-});
+}
+document.addEventListener('visibilitychange', () => (document.hidden ? updateWakeLock() : onReturn()));
+document.addEventListener('resume', onReturn); // the page was frozen in the background
+addEventListener('pageshow', (e) => e.persisted && onReturn());
 
 let fitTimer = 0;
 const refit = () => {
@@ -576,7 +603,7 @@ addEventListener('resize', refit);
 
 document.fonts?.addEventListener?.('loadingdone', () => {
   clearMetrics();
-  metrics = fontMetrics(fontById(S().font));
+  metrics = fontMetrics(fontById(L().font));
   fit();
 });
 $('#font-css')?.addEventListener('load', () => applyFont());
