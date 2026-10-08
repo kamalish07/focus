@@ -1,6 +1,6 @@
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf, dataRev } from './store.js';
+import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev } from './store.js';
 import * as engine from './engine.js';
 import { makeFace, homeFaceType } from './faces.js';
 import { icon } from './ui.js';
@@ -275,14 +275,18 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     }
     const rows = list
       .map((s) => {
-        const c = catById(s.cat);
-        const open = engine.isOpenSession(s.id);
-        const end = sessionEnd(s, now);
-        const when = `${dayLabel(s.start, now)} · ${fmtTime(s.start)}${end - s.start >= MIN ? ` to ${fmtTime(end)}` : ''}`;
+        const info = sessionInfo(s, now);
+        const c = catById(info.cat);
+        const open = info.isLive;
+        const when = `${dayLabel(info.start, now)} · ${fmtTime(info.start)}${info.end > info.start ? ` to ${fmtTime(info.end)}` : ''}`;
+        let badge = '';
+        if (info.isManual) badge = '<span class="sess-pill sess-pill-manual">Manual</span>';
+        else if (info.adj !== 0) badge = `<span class="sess-pill sess-pill-edited">Edited ${info.adj > 0 ? '+' : ''}${fmtDur(info.adj)}</span>`;
+        else if (info.isEdited) badge = '<span class="sess-pill sess-pill-edited">Edited</span>';
         return `<button class="sess" data-sess="${esc(s.id)}"><span class="dot" style="--c:${esc(c.color)}"></span>
           <span class="sess-main"><span class="sess-name">${esc(c.name)}${s.note ? `<span class="sess-note"> · ${esc(s.note)}</span>` : ''}</span>
-          <span class="sess-sub">${esc(when)}${open ? ' · <em>in progress</em>' : ''}</span></span>
-          <span class="sess-dur">${fmtDur(sessionDur(s, now))}</span></button>`;
+          <span class="sess-sub">${esc(when)}${open ? ' · <em>in progress</em>' : ''}${badge}</span></span>
+          <span class="sess-dur">${fmtDur(info.dur)}</span></button>`;
       })
       .join('');
     return `<section class="dash-card flush g-m"><div class="card-head pad"><h3>Recent sessions</h3></div><div class="sess-list">${rows}</div></section>`;

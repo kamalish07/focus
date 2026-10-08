@@ -562,6 +562,43 @@ function sessionEnd(s, now = Date.now()) {
   return last ? last[1] : s.start;
 }
 
+/** Comprehensive session details: accurate time range, worked vs edited time, breaks and mode. */
+function sessionInfo(s, now = Date.now()) {
+  const raw = rawDur(s, now);
+  const dur = sessionDur(s, now);
+  const adj = s.adj || 0;
+  const isLive = s.run != null;
+  const rawEnd = sessionEnd(s, now);
+  const effectiveEnd = Math.max(rawEnd, s.start + dur);
+  const end = isLive ? now : (adj !== 0 ? effectiveEnd : rawEnd);
+
+  let breakMs = 0;
+  if (Array.isArray(s.segs) && s.segs.length > 1) {
+    for (let i = 0; i < s.segs.length - 1; i++) {
+      breakMs += Math.max(0, s.segs[i + 1][0] - s.segs[i][1]);
+    }
+  }
+
+  const isEdited = !!s.edited || adj !== 0;
+  const isManual = s.mode === 'manual';
+
+  return {
+    start: s.start,
+    end,
+    rawEnd,
+    dur,
+    raw,
+    adj,
+    breakMs,
+    isLive,
+    isEdited,
+    isManual,
+    mode: s.mode || 'stopwatch',
+    note: s.note || '',
+    cat: s.cat,
+  };
+}
+
 /** How much of a session falls on each day: { '2026-09-28': ms, ... }. Handles sessions across midnight. */
 function partsOf(s, now) {
   const parts = {};
@@ -671,7 +708,7 @@ function streak(catId = null, now = Date.now()) {
   }
   return n;
 }
-return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, copyLook, lookOf, lookTarget, lookScope, shownLook, setTabScope, pushScope, on, emit, dataRev, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
+return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, copyLook, lookOf, lookTarget, lookScope, shownLook, setTabScope, pushScope, on, emit, dataRev, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, sessionInfo, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
 })();
 
 // ---------- engine.js ----------
@@ -1114,6 +1151,14 @@ let lastMode = null;
 let lastSig = '';
 let lastPos = 0;
 let handlersReady = false;
+let interrupted = false;
+let wasRunning = false;
+
+if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
+  try {
+    navigator.audioSession.type = 'ambient';
+  } catch {}
+}
 
 /** Noise that loops seamlessly (the end is cross-faded into the start). */
 function noise(k, seconds) {
@@ -1217,6 +1262,10 @@ function lockScreen(m, now, isRunning) {
     setState(ms, 'none');
     return;
   }
+  if (interrupted && isRunning) {
+    setState(ms, 'paused');
+    return;
+  }
   const r = engine.runner(m);
   const cat = catById(engine.current(m)?.cat || data.settings.cat);
   const pos = engine.elapsed(m, now);
@@ -1282,9 +1331,14 @@ function hold(ms) {
 function sync(now = Date.now()) {
   const s = data.settings;
   const m = engine.active();
+  const isRunning = !!m;
+  if (isRunning && !wasRunning) {
+    interrupted = false;
+  }
+  wasRunning = isRunning;
   if (m) lastMode = m;
   const shown = m || (lastMode && engine.hasProgress(lastMode) ? lastMode : null);
-  const want = (!!m || now < holdUntil) && s.bgSound !== 'off';
+  const want = (isRunning || now < holdUntil) && s.bgSound !== 'off';
 
   if (want) {
     setupHandlers();
@@ -1293,16 +1347,32 @@ function sync(now = Date.now()) {
       el.loop = true;
       el.preload = 'auto';
       el.setAttribute('playsinline', '');
+      el.addEventListener('pause', () => {
+        // If a clock is running and the audio is paused, it was paused externally
+        // (e.g. another app took audio focus or lock screen pause). Do not loop-steal focus.
+        if (engine.active()) {
+          interrupted = true;
+        }
+      });
+      el.addEventListener('play', () => {
+        interrupted = false;
+      });
     }
     if (kind !== s.bgSound) {
       kind = s.bgSound;
       el.src = urlFor(kind);
+      interrupted = false;
     }
     const vol = kind === 'silent' ? 1 : s.ambientVol;
     if (el.volume !== vol) el.volume = vol;
-    if (el.paused) el.play().catch(() => {});
-  } else if (el && !el.paused) {
-    el.pause();
+    if (el.paused && !interrupted) {
+      el.play().catch(() => {
+        interrupted = true;
+      });
+    }
+  } else {
+    interrupted = false;
+    if (el && !el.paused) el.pause();
   }
 
   if (s.bgSound !== 'off' && !m && now < holdUntil) alarmScreen();
@@ -1313,6 +1383,7 @@ function sync(now = Date.now()) {
 
 /** Call from a tap: browsers only allow audio to start after the user interacts. */
 function kick() {
+  interrupted = false;
   lastPos = 0;
   sync();
 }
@@ -2362,11 +2433,11 @@ return { icon, canVibrate, haptic, overlayOpen, sheet, dialog, confirmDialog, to
 
 // ---------- sheets.js ----------
 __m.sheets = (() => {
-const { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, nextColor, NONE } = __m.store;
+const { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
 const { PALETTE, TIMER_PRESETS } = __m.config;
 const engine = __m.engine;
 const { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } = __m.ui;
-const { esc, fmtDur, pad, uid, getPath, setPath, MIN, HOUR, SEC } = __m.util;
+const { esc, fmtDur, fmtTime, pad, uid, getPath, setPath, MIN, HOUR, SEC } = __m.util;
 
 const minus = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
 const adjustChips = (list) =>
@@ -2711,9 +2782,29 @@ function openSessionEditor(s, dayK, onDone) {
   if (catId !== NONE && !cats.some((c) => c.id === catId)) cats.push(catById(catId)); // a deleted category's session
   cats.push(catById(NONE));
 
+  const info = s ? sessionInfo(s, now) : null;
+  const MODE_NAME = { stopwatch: 'Stopwatch', timer: 'Timer', pomodoro: 'Pomodoro', manual: 'Added manually' };
+  let detailRows = '';
+  if (info) {
+    detailRows += `
+      <div class="sess-detail-row"><span class="sess-detail-label">Time window</span><span class="sess-detail-val" data-live-range>${fmtTime(info.start)} to ${fmtTime(info.end)}</span></div>
+      <div class="sess-detail-row"><span class="sess-detail-label">Focus duration</span><span class="sess-detail-val" data-live-dur>${fmtDur(info.dur)}</span></div>
+      ${info.adj !== 0 ? `<div class="sess-detail-row"><span class="sess-detail-label">Adjusted</span><span class="sess-detail-val sess-detail-highlight">${info.adj > 0 ? '+' : ''}${fmtDur(info.adj)} edited (${fmtDur(info.raw)} recorded)</span></div>` : info.isEdited ? `<div class="sess-detail-row"><span class="sess-detail-label">Status</span><span class="sess-detail-val sess-detail-highlight">Edited session</span></div>` : ''}
+      ${info.breakMs >= MIN ? `<div class="sess-detail-row"><span class="sess-detail-label">Breaks / pauses</span><span class="sess-detail-val">${fmtDur(info.breakMs)} across ${s.segs.length} intervals</span></div>` : ''}
+      <div class="sess-detail-row"><span class="sess-detail-label">Source</span><span class="sess-detail-val">${MODE_NAME[info.mode] || 'Stopwatch'}</span></div>
+    `;
+  } else {
+    detailRows += `
+      <div class="sess-detail-row"><span class="sess-detail-label">Time window</span><span class="sess-detail-val" data-live-range>${fmtTime(start)} to ${fmtTime(start + dur)}</span></div>
+      <div class="sess-detail-row"><span class="sess-detail-label">Focus duration</span><span class="sess-detail-val" data-live-dur>${fmtDur(dur)}</span></div>
+      <div class="sess-detail-row"><span class="sess-detail-label">Source</span><span class="sess-detail-val">Manual entry</span></div>
+    `;
+  }
+
   const sh = sheet({
-    title: isNew ? 'Add session' : 'Edit session',
-    body: `<div class="field"><span class="field-label">Category</span><div class="chips" role="radiogroup">
+    title: isNew ? 'Add session' : 'Session details',
+    body: `<div class="sess-detail-card">${detailRows}</div>
+      <div class="field"><span class="field-label">Category</span><div class="chips" role="radiogroup">
         ${cats.map((c) => `<button class="chip" role="radio" data-cat="${esc(c.id)}" aria-checked="${c.id === catId}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
       </div></div>
       <div class="field-row">
@@ -2732,6 +2823,30 @@ function openSessionEditor(s, dayK, onDone) {
   const m0 = Math.floor((dur % HOUR) / MIN);
   wh.set(Math.min(23, h0));
   wm.set(m0);
+
+  const updateLiveDetails = () => {
+    const dv = sh.body.querySelector('[data-date]')?.value;
+    const tv = sh.body.querySelector('[data-time]')?.value;
+    if (!dv || !tv) return;
+    const [y, mo, da] = dv.split('-').map(Number);
+    const [hh, mi] = tv.split(':').map(Number);
+    const curStart = new Date(y, mo - 1, da, hh, mi).getTime();
+    const curDur = wh.get() * HOUR + wm.get() * MIN;
+    const curEnd = curStart + curDur;
+    const rangeEl = sh.body.querySelector('[data-live-range]');
+    const durEl = sh.body.querySelector('[data-live-dur]');
+    if (rangeEl) rangeEl.textContent = `${fmtTime(curStart)} to ${fmtTime(curEnd)}`;
+    if (durEl) durEl.textContent = fmtDur(curDur);
+  };
+
+  sh.body.querySelector('[data-date]').addEventListener('change', updateLiveDetails);
+  sh.body.querySelector('[data-time]').addEventListener('change', updateLiveDetails);
+  sh.body.querySelector('[data-date]').addEventListener('input', updateLiveDetails);
+  sh.body.querySelector('[data-time]').addEventListener('input', updateLiveDetails);
+  wh.firstElementChild?.addEventListener('scroll', () => setTimeout(updateLiveDetails, 20), { passive: true });
+  wm.firstElementChild?.addEventListener('scroll', () => setTimeout(updateLiveDetails, 20), { passive: true });
+  wh.addEventListener('click', () => setTimeout(updateLiveDetails, 20));
+  wm.addEventListener('click', () => setTimeout(updateLiveDetails, 20));
 
   sh.body.addEventListener('click', (e) => {
     const chip = e.target.closest('[data-cat]');
@@ -2770,12 +2885,19 @@ function openSessionEditor(s, dayK, onDone) {
     if (newStart + newDur > Date.now() + MIN) return toast('A session can’t end in the future');
     const note = sh.body.querySelector('[data-note]').value.trim();
     if (isNew) {
-      data.sessions.push({ id: uid(), cat: catId, mode: 'manual', start: newStart, segs: [[newStart, newStart + newDur]], adj: 0, run: null, note });
+      data.sessions.push({ id: uid(), cat: catId, mode: 'manual', start: newStart, segs: [[newStart, newStart + newDur]], adj: 0, run: null, note, edited: false });
     } else {
+      const anyChange = timeChanged || durChanged || s.cat !== catId || s.note !== note;
       if (timeChanged || durChanged) {
+        if (!s.originalDur) s.originalDur = dur;
+        s.edited = true;
+        s.editedAt = Date.now();
         s.start = newStart;
         s.segs = [[newStart, newStart + newDur]];
         s.adj = 0;
+      } else if (anyChange) {
+        s.edited = true;
+        s.editedAt = Date.now();
       }
       s.cat = catId;
       s.note = note;
@@ -2791,7 +2913,7 @@ return { openEditor, openGoalSheet, openCategories, deleteCategory, openCategory
 
 // ---------- stats.js ----------
 __m.stats = (() => {
-const { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } = __m.store;
+const { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, streak, NONE, usesNone } = __m.store;
 const { icon } = __m.ui;
 const { openSessionEditor, openCategoryEditor, deleteCategory } = __m.sheets;
 const engine = __m.engine;
@@ -3091,17 +3213,31 @@ function mountStats(root, { visible = () => true } = {}) {
   }
 
   function sessionRow(s, now) {
-    const c = catById(s.cat);
-    const live = engine.isOpenSession(s.id);
-    const end = sessionEnd(s, now);
-    const when = end - s.start >= MIN ? `${fmtTime(s.start)} to ${fmtTime(end)}` : fmtTime(s.start);
+    const info = sessionInfo(s, now);
+    const c = catById(info.cat);
+    const live = info.isLive;
+    const when = info.end > info.start ? `${fmtTime(info.start)} to ${fmtTime(info.end)}` : fmtTime(info.start);
+    let badges = '';
+    if (info.isManual) {
+      badges += '<span class="sess-pill sess-pill-manual">Manual</span>';
+    } else if (info.adj !== 0) {
+      badges += `<span class="sess-pill sess-pill-edited">Edited ${info.adj > 0 ? '+' : ''}${fmtDur(info.adj)}</span>`;
+    } else if (info.isEdited) {
+      badges += '<span class="sess-pill sess-pill-edited">Edited</span>';
+    }
+    const breakTag = info.breakMs >= MIN ? `<span class="sess-break">(${fmtDur(info.breakMs)} break)</span>` : '';
     return `<button class="sess" data-sess="${esc(s.id)}">
         <span class="dot" style="--c:${esc(c.color)}"></span>
         <span class="sess-main">
           <span class="sess-name">${esc(c.name)}${s.note ? `<span class="sess-note"> · ${esc(s.note)}</span>` : ''}</span>
-          <span class="sess-sub">${icon(MODE_ICON[s.mode] || 'stopwatch')}${esc(when)}${live ? ' · <em>in progress</em>' : ` · ${MODE_NAME[s.mode] || ''}`}</span>
+          <span class="sess-sub">
+            <span class="sess-time">${icon(MODE_ICON[info.mode] || 'stopwatch')}<span>${esc(when)}</span></span>
+            ${live ? '<em>in progress</em>' : `<span class="sess-mode">${esc(MODE_NAME[info.mode] || '')}</span>`}
+            ${badges}
+            ${breakTag}
+          </span>
         </span>
-        <span class="sess-dur">${fmtDur(sessionDur(s, now))}</span>
+        <span class="sess-dur">${fmtDur(info.dur)}</span>
       </button>`;
   }
 
@@ -3173,7 +3309,7 @@ return { mountStats };
 __m.home = (() => {
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, lookOf, dataRev } = __m.store;
+const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev } = __m.store;
 const engine = __m.engine;
 const { makeFace, homeFaceType } = __m.faces;
 const { icon } = __m.ui;
@@ -3448,14 +3584,18 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     }
     const rows = list
       .map((s) => {
-        const c = catById(s.cat);
-        const open = engine.isOpenSession(s.id);
-        const end = sessionEnd(s, now);
-        const when = `${dayLabel(s.start, now)} · ${fmtTime(s.start)}${end - s.start >= MIN ? ` to ${fmtTime(end)}` : ''}`;
+        const info = sessionInfo(s, now);
+        const c = catById(info.cat);
+        const open = info.isLive;
+        const when = `${dayLabel(info.start, now)} · ${fmtTime(info.start)}${info.end > info.start ? ` to ${fmtTime(info.end)}` : ''}`;
+        let badge = '';
+        if (info.isManual) badge = '<span class="sess-pill sess-pill-manual">Manual</span>';
+        else if (info.adj !== 0) badge = `<span class="sess-pill sess-pill-edited">Edited ${info.adj > 0 ? '+' : ''}${fmtDur(info.adj)}</span>`;
+        else if (info.isEdited) badge = '<span class="sess-pill sess-pill-edited">Edited</span>';
         return `<button class="sess" data-sess="${esc(s.id)}"><span class="dot" style="--c:${esc(c.color)}"></span>
           <span class="sess-main"><span class="sess-name">${esc(c.name)}${s.note ? `<span class="sess-note"> · ${esc(s.note)}</span>` : ''}</span>
-          <span class="sess-sub">${esc(when)}${open ? ' · <em>in progress</em>' : ''}</span></span>
-          <span class="sess-dur">${fmtDur(sessionDur(s, now))}</span></button>`;
+          <span class="sess-sub">${esc(when)}${open ? ' · <em>in progress</em>' : ''}${badge}</span></span>
+          <span class="sess-dur">${fmtDur(info.dur)}</span></button>`;
       })
       .join('');
     return `<section class="dash-card flush g-m"><div class="card-head pad"><h3>Recent sessions</h3></div><div class="sess-list">${rows}</div></section>`;
@@ -4275,7 +4415,7 @@ function openSettings() {
           row(
             'Keep running with screen off',
             `<select class="select" data-key="bgSound" aria-label="Background sound">${BG_SOUNDS.map(([v, l]) => `<option value="${v}"${s.bgSound === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`,
-            'Plays a track the phone treats like music, so the clock keeps ticking, alarms ring on time and the lock screen shows play/pause. “Silent” can’t be heard. Other music apps may pause.'
+            'Plays a track so the clock keeps ticking and alarms ring on time with the screen off. Uses ambient audio to let other music or podcast apps play in the background.'
           ) +
             row('Focus sound volume', range('ambientVol', 0.05, 1, 0.05, 'Focus sound volume'), 'For brown, pink and white noise') +
             row('Keep screen on', switchEl('wakeLock', s.wakeLock, 'Keep screen on'), 'While a clock is running and the app is open')

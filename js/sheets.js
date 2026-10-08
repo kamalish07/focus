@@ -1,8 +1,8 @@
-import { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, nextColor, NONE } from './store.js';
+import { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, sessionInfo, nextColor, NONE } from './store.js';
 import { PALETTE, TIMER_PRESETS } from './config.js';
 import * as engine from './engine.js';
 import { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } from './ui.js';
-import { esc, fmtDur, pad, uid, getPath, setPath, MIN, HOUR, SEC } from './util.js';
+import { esc, fmtDur, fmtTime, pad, uid, getPath, setPath, MIN, HOUR, SEC } from './util.js';
 
 const minus = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
 const adjustChips = (list) =>
@@ -347,9 +347,29 @@ export function openSessionEditor(s, dayK, onDone) {
   if (catId !== NONE && !cats.some((c) => c.id === catId)) cats.push(catById(catId)); // a deleted category's session
   cats.push(catById(NONE));
 
+  const info = s ? sessionInfo(s, now) : null;
+  const MODE_NAME = { stopwatch: 'Stopwatch', timer: 'Timer', pomodoro: 'Pomodoro', manual: 'Added manually' };
+  let detailRows = '';
+  if (info) {
+    detailRows += `
+      <div class="sess-detail-row"><span class="sess-detail-label">Time window</span><span class="sess-detail-val" data-live-range>${fmtTime(info.start)} to ${fmtTime(info.end)}</span></div>
+      <div class="sess-detail-row"><span class="sess-detail-label">Focus duration</span><span class="sess-detail-val" data-live-dur>${fmtDur(info.dur)}</span></div>
+      ${info.adj !== 0 ? `<div class="sess-detail-row"><span class="sess-detail-label">Adjusted</span><span class="sess-detail-val sess-detail-highlight">${info.adj > 0 ? '+' : ''}${fmtDur(info.adj)} edited (${fmtDur(info.raw)} recorded)</span></div>` : info.isEdited ? `<div class="sess-detail-row"><span class="sess-detail-label">Status</span><span class="sess-detail-val sess-detail-highlight">Edited session</span></div>` : ''}
+      ${info.breakMs >= MIN ? `<div class="sess-detail-row"><span class="sess-detail-label">Breaks / pauses</span><span class="sess-detail-val">${fmtDur(info.breakMs)} across ${s.segs.length} intervals</span></div>` : ''}
+      <div class="sess-detail-row"><span class="sess-detail-label">Source</span><span class="sess-detail-val">${MODE_NAME[info.mode] || 'Stopwatch'}</span></div>
+    `;
+  } else {
+    detailRows += `
+      <div class="sess-detail-row"><span class="sess-detail-label">Time window</span><span class="sess-detail-val" data-live-range>${fmtTime(start)} to ${fmtTime(start + dur)}</span></div>
+      <div class="sess-detail-row"><span class="sess-detail-label">Focus duration</span><span class="sess-detail-val" data-live-dur>${fmtDur(dur)}</span></div>
+      <div class="sess-detail-row"><span class="sess-detail-label">Source</span><span class="sess-detail-val">Manual entry</span></div>
+    `;
+  }
+
   const sh = sheet({
-    title: isNew ? 'Add session' : 'Edit session',
-    body: `<div class="field"><span class="field-label">Category</span><div class="chips" role="radiogroup">
+    title: isNew ? 'Add session' : 'Session details',
+    body: `<div class="sess-detail-card">${detailRows}</div>
+      <div class="field"><span class="field-label">Category</span><div class="chips" role="radiogroup">
         ${cats.map((c) => `<button class="chip" role="radio" data-cat="${esc(c.id)}" aria-checked="${c.id === catId}"><span class="dot" style="--c:${esc(c.color)}"></span>${esc(c.name)}</button>`).join('')}
       </div></div>
       <div class="field-row">
@@ -368,6 +388,30 @@ export function openSessionEditor(s, dayK, onDone) {
   const m0 = Math.floor((dur % HOUR) / MIN);
   wh.set(Math.min(23, h0));
   wm.set(m0);
+
+  const updateLiveDetails = () => {
+    const dv = sh.body.querySelector('[data-date]')?.value;
+    const tv = sh.body.querySelector('[data-time]')?.value;
+    if (!dv || !tv) return;
+    const [y, mo, da] = dv.split('-').map(Number);
+    const [hh, mi] = tv.split(':').map(Number);
+    const curStart = new Date(y, mo - 1, da, hh, mi).getTime();
+    const curDur = wh.get() * HOUR + wm.get() * MIN;
+    const curEnd = curStart + curDur;
+    const rangeEl = sh.body.querySelector('[data-live-range]');
+    const durEl = sh.body.querySelector('[data-live-dur]');
+    if (rangeEl) rangeEl.textContent = `${fmtTime(curStart)} to ${fmtTime(curEnd)}`;
+    if (durEl) durEl.textContent = fmtDur(curDur);
+  };
+
+  sh.body.querySelector('[data-date]').addEventListener('change', updateLiveDetails);
+  sh.body.querySelector('[data-time]').addEventListener('change', updateLiveDetails);
+  sh.body.querySelector('[data-date]').addEventListener('input', updateLiveDetails);
+  sh.body.querySelector('[data-time]').addEventListener('input', updateLiveDetails);
+  wh.firstElementChild?.addEventListener('scroll', () => setTimeout(updateLiveDetails, 20), { passive: true });
+  wm.firstElementChild?.addEventListener('scroll', () => setTimeout(updateLiveDetails, 20), { passive: true });
+  wh.addEventListener('click', () => setTimeout(updateLiveDetails, 20));
+  wm.addEventListener('click', () => setTimeout(updateLiveDetails, 20));
 
   sh.body.addEventListener('click', (e) => {
     const chip = e.target.closest('[data-cat]');
@@ -406,12 +450,19 @@ export function openSessionEditor(s, dayK, onDone) {
     if (newStart + newDur > Date.now() + MIN) return toast('A session can’t end in the future');
     const note = sh.body.querySelector('[data-note]').value.trim();
     if (isNew) {
-      data.sessions.push({ id: uid(), cat: catId, mode: 'manual', start: newStart, segs: [[newStart, newStart + newDur]], adj: 0, run: null, note });
+      data.sessions.push({ id: uid(), cat: catId, mode: 'manual', start: newStart, segs: [[newStart, newStart + newDur]], adj: 0, run: null, note, edited: false });
     } else {
+      const anyChange = timeChanged || durChanged || s.cat !== catId || s.note !== note;
       if (timeChanged || durChanged) {
+        if (!s.originalDur) s.originalDur = dur;
+        s.edited = true;
+        s.editedAt = Date.now();
         s.start = newStart;
         s.segs = [[newStart, newStart + newDur]];
         s.adj = 0;
+      } else if (anyChange) {
+        s.edited = true;
+        s.editedAt = Date.now();
       }
       s.cat = catId;
       s.note = note;

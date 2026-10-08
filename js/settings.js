@@ -109,7 +109,7 @@ export function openSettings() {
           row(
             'Keep running with screen off',
             `<select class="select" data-key="bgSound" aria-label="Background sound">${BG_SOUNDS.map(([v, l]) => `<option value="${v}"${s.bgSound === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`,
-            'Plays a track the phone treats like music, so the clock keeps ticking, alarms ring on time and the lock screen shows play/pause. “Silent” can’t be heard. Other music apps may pause.'
+            'Plays a track so the clock keeps ticking and alarms ring on time with the screen off. Uses ambient audio to let other music or podcast apps play in the background.'
           ) +
             row('Focus sound volume', range('ambientVol', 0.05, 1, 0.05, 'Focus sound volume'), 'For brown, pink and white noise') +
             row('Keep screen on', switchEl('wakeLock', s.wakeLock, 'Keep screen on'), 'While a clock is running and the app is open')

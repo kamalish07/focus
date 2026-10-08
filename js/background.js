@@ -17,6 +17,14 @@ let lastMode = null;
 let lastSig = '';
 let lastPos = 0;
 let handlersReady = false;
+let interrupted = false;
+let wasRunning = false;
+
+if (typeof navigator !== 'undefined' && 'audioSession' in navigator) {
+  try {
+    navigator.audioSession.type = 'ambient';
+  } catch {}
+}
 
 /** Noise that loops seamlessly (the end is cross-faded into the start). */
 function noise(k, seconds) {
@@ -120,6 +128,10 @@ function lockScreen(m, now, isRunning) {
     setState(ms, 'none');
     return;
   }
+  if (interrupted && isRunning) {
+    setState(ms, 'paused');
+    return;
+  }
   const r = engine.runner(m);
   const cat = catById(engine.current(m)?.cat || data.settings.cat);
   const pos = engine.elapsed(m, now);
@@ -185,9 +197,14 @@ export function hold(ms) {
 export function sync(now = Date.now()) {
   const s = data.settings;
   const m = engine.active();
+  const isRunning = !!m;
+  if (isRunning && !wasRunning) {
+    interrupted = false;
+  }
+  wasRunning = isRunning;
   if (m) lastMode = m;
   const shown = m || (lastMode && engine.hasProgress(lastMode) ? lastMode : null);
-  const want = (!!m || now < holdUntil) && s.bgSound !== 'off';
+  const want = (isRunning || now < holdUntil) && s.bgSound !== 'off';
 
   if (want) {
     setupHandlers();
@@ -196,16 +213,32 @@ export function sync(now = Date.now()) {
       el.loop = true;
       el.preload = 'auto';
       el.setAttribute('playsinline', '');
+      el.addEventListener('pause', () => {
+        // If a clock is running and the audio is paused, it was paused externally
+        // (e.g. another app took audio focus or lock screen pause). Do not loop-steal focus.
+        if (engine.active()) {
+          interrupted = true;
+        }
+      });
+      el.addEventListener('play', () => {
+        interrupted = false;
+      });
     }
     if (kind !== s.bgSound) {
       kind = s.bgSound;
       el.src = urlFor(kind);
+      interrupted = false;
     }
     const vol = kind === 'silent' ? 1 : s.ambientVol;
     if (el.volume !== vol) el.volume = vol;
-    if (el.paused) el.play().catch(() => {});
-  } else if (el && !el.paused) {
-    el.pause();
+    if (el.paused && !interrupted) {
+      el.play().catch(() => {
+        interrupted = true;
+      });
+    }
+  } else {
+    interrupted = false;
+    if (el && !el.paused) el.pause();
   }
 
   if (s.bgSound !== 'off' && !m && now < holdUntil) alarmScreen();
@@ -216,6 +249,7 @@ export function sync(now = Date.now()) {
 
 /** Call from a tap: browsers only allow audio to start after the user interacts. */
 export function kick() {
+  interrupted = false;
   lastPos = 0;
   sync();
 }

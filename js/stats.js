@@ -1,4 +1,4 @@
-import { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, streak, NONE, usesNone } from './store.js';
+import { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, streak, NONE, usesNone } from './store.js';
 import { icon } from './ui.js';
 import { openSessionEditor, openCategoryEditor, deleteCategory } from './sheets.js';
 import * as engine from './engine.js';
@@ -298,17 +298,31 @@ export function mountStats(root, { visible = () => true } = {}) {
   }
 
   function sessionRow(s, now) {
-    const c = catById(s.cat);
-    const live = engine.isOpenSession(s.id);
-    const end = sessionEnd(s, now);
-    const when = end - s.start >= MIN ? `${fmtTime(s.start)} to ${fmtTime(end)}` : fmtTime(s.start);
+    const info = sessionInfo(s, now);
+    const c = catById(info.cat);
+    const live = info.isLive;
+    const when = info.end > info.start ? `${fmtTime(info.start)} to ${fmtTime(info.end)}` : fmtTime(info.start);
+    let badges = '';
+    if (info.isManual) {
+      badges += '<span class="sess-pill sess-pill-manual">Manual</span>';
+    } else if (info.adj !== 0) {
+      badges += `<span class="sess-pill sess-pill-edited">Edited ${info.adj > 0 ? '+' : ''}${fmtDur(info.adj)}</span>`;
+    } else if (info.isEdited) {
+      badges += '<span class="sess-pill sess-pill-edited">Edited</span>';
+    }
+    const breakTag = info.breakMs >= MIN ? `<span class="sess-break">(${fmtDur(info.breakMs)} break)</span>` : '';
     return `<button class="sess" data-sess="${esc(s.id)}">
         <span class="dot" style="--c:${esc(c.color)}"></span>
         <span class="sess-main">
           <span class="sess-name">${esc(c.name)}${s.note ? `<span class="sess-note"> · ${esc(s.note)}</span>` : ''}</span>
-          <span class="sess-sub">${icon(MODE_ICON[s.mode] || 'stopwatch')}${esc(when)}${live ? ' · <em>in progress</em>' : ` · ${MODE_NAME[s.mode] || ''}`}</span>
+          <span class="sess-sub">
+            <span class="sess-time">${icon(MODE_ICON[info.mode] || 'stopwatch')}<span>${esc(when)}</span></span>
+            ${live ? '<em>in progress</em>' : `<span class="sess-mode">${esc(MODE_NAME[info.mode] || '')}</span>`}
+            ${badges}
+            ${breakTag}
+          </span>
         </span>
-        <span class="sess-dur">${fmtDur(sessionDur(s, now))}</span>
+        <span class="sess-dur">${fmtDur(info.dur)}</span>
       </button>`;
   }
 

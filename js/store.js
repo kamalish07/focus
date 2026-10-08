@@ -365,6 +365,43 @@ export function sessionEnd(s, now = Date.now()) {
   return last ? last[1] : s.start;
 }
 
+/** Comprehensive session details: accurate time range, worked vs edited time, breaks and mode. */
+export function sessionInfo(s, now = Date.now()) {
+  const raw = rawDur(s, now);
+  const dur = sessionDur(s, now);
+  const adj = s.adj || 0;
+  const isLive = s.run != null;
+  const rawEnd = sessionEnd(s, now);
+  const effectiveEnd = Math.max(rawEnd, s.start + dur);
+  const end = isLive ? now : (adj !== 0 ? effectiveEnd : rawEnd);
+
+  let breakMs = 0;
+  if (Array.isArray(s.segs) && s.segs.length > 1) {
+    for (let i = 0; i < s.segs.length - 1; i++) {
+      breakMs += Math.max(0, s.segs[i + 1][0] - s.segs[i][1]);
+    }
+  }
+
+  const isEdited = !!s.edited || adj !== 0;
+  const isManual = s.mode === 'manual';
+
+  return {
+    start: s.start,
+    end,
+    rawEnd,
+    dur,
+    raw,
+    adj,
+    breakMs,
+    isLive,
+    isEdited,
+    isManual,
+    mode: s.mode || 'stopwatch',
+    note: s.note || '',
+    cat: s.cat,
+  };
+}
+
 /** How much of a session falls on each day: { '2026-09-28': ms, ... }. Handles sessions across midnight. */
 function partsOf(s, now) {
   const parts = {};
