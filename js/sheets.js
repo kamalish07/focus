@@ -478,28 +478,11 @@ export function openSessionEditor(s, dayK, onDone) {
 /* ---------- account & cloud sync ---------- */
 
 export function openAccountSheet(onDone) {
-  let activeTab = 'signin';
-  let showConfig = false;
-  let showSql = false;
-
-  const SQL_SNIPPET = `create table if not exists user_data (
-  user_id uuid references auth.users not null primary key,
-  settings jsonb,
-  cats jsonb,
-  sessions jsonb,
-  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
-alter table user_data enable row level security;
-
-create policy "Users can manage own data" on user_data
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);`;
+  let activeTab = 'signup';
 
   function renderBody() {
     const status = getSyncStatus();
     const user = status.user;
-    const cfg = getSupabaseConfig();
-    const hasConfig = isConfigured();
 
     if (user) {
       const syncDotClass = status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
@@ -520,71 +503,32 @@ create policy "Users can manage own data" on user_data
           <button class="btn primary" data-sync-now>${icon('sync')}<span>Sync now</span></button>
           <button class="btn danger" data-sign-out>Sign out</button>
         </div>
-        <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
-          <button class="btn sm ghost block" data-toggle-cfg>${icon('settings')}<span>${showConfig ? 'Hide connection settings' : 'View connection settings'}</span></button>
-          ${showConfig ? `
-            <div style="margin-top:12px">
-              <label class="field"><span class="field-label">Supabase Project URL</span><input class="input" data-cfg-url value="${esc(cfg.url)}"></label>
-              <label class="field"><span class="field-label">Anon Public Key</span><input class="input" type="password" data-cfg-key value="${esc(cfg.key)}"></label>
-              <button class="btn sm" data-save-cfg>Save settings</button>
-            </div>
-          ` : ''}
-        </div>
-      `;
-    }
-
-    if (!hasConfig) {
-      return `
-        <div style="text-align:center;padding:10px 0 16px">
-          <div class="account-icon" style="margin:0 auto 12px;width:52px;height:52px">${icon('cloud')}</div>
-          <h3 style="margin:0 0 6px">Connect Cloud Sync</h3>
-          <p class="hint" style="margin:0 auto;max-width:320px">To sync across laptop and mobile, connect your free Supabase project.</p>
-        </div>
-        <div class="auth-err" hidden></div>
-        <label class="field"><span class="field-label">Project URL</span><input class="input" data-cfg-url placeholder="https://xyzcompany.supabase.co" value="${esc(cfg.url)}"></label>
-        <label class="field"><span class="field-label">Anon Public Key</span><input class="input" data-cfg-key placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." value="${esc(cfg.key)}"></label>
-        <button class="btn primary block" data-save-cfg>Continue</button>
-        <div class="setup-guide">
-          <strong>How to get your free credentials in 1 minute:</strong>
-          <ol>
-            <li>Go to <a href="https://supabase.com" target="_blank" rel="noopener" style="color:var(--accent)">supabase.com</a> and create a free project.</li>
-            <li>In <strong>Project Settings → API</strong>, copy the Project URL and anon key.</li>
-            <li>In <strong>SQL Editor</strong>, run the setup script:</li>
-          </ol>
-          <button class="btn sm ghost" data-toggle-sql>${showSql ? 'Hide SQL script' : 'Show SQL script'}</button>
-          ${showSql ? `
-            <pre class="sql-box">${esc(SQL_SNIPPET)}</pre>
-            <button class="btn sm" data-copy-sql>${icon('copy')}<span>Copy SQL</span></button>
-          ` : ''}
-        </div>
       `;
     }
 
     return `
       <div class="auth-tabs">
-        <div class="auth-tab ${activeTab === 'signin' ? 'active' : ''}" data-tab="signin">Sign In</div>
         <div class="auth-tab ${activeTab === 'signup' ? 'active' : ''}" data-tab="signup">Create ID</div>
+        <div class="auth-tab ${activeTab === 'signin' ? 'active' : ''}" data-tab="signin">Sign In</div>
       </div>
       <div class="auth-err" hidden></div>
-      <label class="field"><span class="field-label">Username or Email</span><input class="input" data-auth-id autocomplete="username" placeholder="e.g. kamal or you@example.com"></label>
-      <label class="field"><span class="field-label">Password</span><input class="input" type="password" data-auth-pass autocomplete="current-password" placeholder="At least 6 characters"></label>
-      <button class="btn primary block" data-auth-submit>${activeTab === 'signin' ? 'Sign In' : 'Create Account'}</button>
-      <p class="hint small center" style="margin-top:14px">${activeTab === 'signin' ? 'Sign in with the same ID on your laptop and phone to sync.' : 'Create an ID to access your focus stats from anywhere.'}</p>
-      <div style="margin-top:16px;text-align:center">
-        <button class="btn sm ghost" data-toggle-cfg style="border:none">Change Supabase connection</button>
-      </div>
-      ${showConfig ? `
-        <div style="margin-top:12px;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">
-          <label class="field"><span class="field-label">Project URL</span><input class="input" data-cfg-url value="${esc(cfg.url)}"></label>
-          <label class="field"><span class="field-label">Anon Key</span><input class="input" type="password" data-cfg-key value="${esc(cfg.key)}"></label>
-          <button class="btn sm" data-save-cfg>Update URL & Key</button>
-        </div>
-      ` : ''}
+      <label class="field">
+        <span class="field-label">${activeTab === 'signup' ? 'Choose a Username' : 'Username'}</span>
+        <input class="input" data-auth-id autocomplete="username" placeholder="e.g. kamal">
+      </label>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input class="input" type="password" data-auth-pass autocomplete="${activeTab === 'signup' ? 'new-password' : 'current-password'}" placeholder="At least 6 characters">
+      </label>
+      <button class="btn primary block" data-auth-submit>${activeTab === 'signup' ? 'Create ID & Sync' : 'Sign In'}</button>
+      <p class="hint small center" style="margin-top:14px">
+        ${activeTab === 'signup' ? 'Create an ID to automatically sync and access your focus time on laptop and mobile.' : 'Sign in with the same username on your laptop and phone to sync your data.'}
+      </p>
     `;
   }
 
   const sh = sheet({
-    title: 'Cloud Sync & Account',
+    title: 'Focus Cloud Sync',
     body: `<div class="auth-wrap">${renderBody()}</div>`,
   });
 
@@ -673,17 +617,13 @@ create policy "Users can manage own data" on user_data
       try {
         if (activeTab === 'signin') {
           const res = await signIn(identity, password);
-          toast(`Signed in as ${res.user.email?.split('@')[0] || 'User'}`);
+          const uname = res.user?.user_metadata?.username || res.user?.email?.split('@')[0] || identity;
+          toast(`Signed in as ${uname}!`);
         } else {
           const res = await signUp(identity, password);
-          if (res.autoLoggedIn) {
-            toast(`Account created for ${identity}!`);
-          } else {
-            toast('Account created! Please check your email to confirm, then sign in.');
-            activeTab = 'signin';
-          }
+          toast(`Welcome ${identity}! Cloud sync active.`);
         }
-        update();
+        sh.close();
         onDone?.();
       } catch (err) {
         if (errEl) {
