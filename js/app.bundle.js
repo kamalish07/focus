@@ -8,8 +8,8 @@ __m.config = (() => {
 const APP_VERSION = '1.11.0';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
-const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_bR3K8KmpkkGDOBnH4DgIeg_c1IBc_6I';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {

@@ -1,8 +1,8 @@
 export const APP_VERSION = '1.11.0';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
-export const SUPABASE_URL = '';
-export const SUPABASE_ANON_KEY = '';
+export const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
+export const SUPABASE_ANON_KEY = 'sb_publishable_bR3K8KmpkkGDOBnH4DgIeg_c1IBc_6I';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 export const THEMES = {
