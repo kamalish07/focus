@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION whenever you change the app files so phones pick up the update.
-const VERSION = 'focus-v1.11.1';
+const VERSION = 'focus-v1.11.2';
 const FONT_CACHE = 'focus-fonts';
 const SHELL = [
   './',
@@ -72,3 +72,8 @@ self.addEventListener('notificationclick', (e) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((wins) => (wins[0] ? wins[0].focus() : self.clients.openWindow('./')))
   );
 });
+
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+

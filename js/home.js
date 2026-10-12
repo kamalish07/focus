@@ -1,10 +1,11 @@
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev } from './store.js';
+import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev, on } from './store.js';
 import * as engine from './engine.js';
 import { makeFace, homeFaceType } from './faces.js';
 import { icon } from './ui.js';
-import { openSessionEditor, openGoalSheet } from './sheets.js';
+import { openSessionEditor, openGoalSheet, openAccountSheet } from './sheets.js';
+import { currentUser, getSyncStatus } from './supabase.js';
 import { esc, fmtDur, fmtTime, fmtDate, pad, clamp, hms, MIN } from './util.js';
 
 const PHONE_24 = new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
@@ -42,6 +43,9 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
       <header class="hero-head">
         <div class="hero-when"><span class="greet"></span><span class="home-date"></span></div>
         <div class="topbar-right">
+          <button class="pill user-pill home-user-pill" style="display:none" aria-label="Account">
+            <span class="sync-dot synced"></span><span class="user-name"></span>
+          </button>
           <button class="icon-btn" data-looks aria-label="Looks" title="Looks">${icon('palette')}</button>
           <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
         </div>
@@ -60,6 +64,26 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
   const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
+  const homeUserPill = root.querySelector('.home-user-pill');
+  function syncHomeUser() {
+    if (!homeUserPill) return;
+    const user = currentUser();
+    const status = getSyncStatus();
+    homeUserPill.style.display = 'inline-flex';
+    const dot = homeUserPill.querySelector('.sync-dot');
+    if (user) {
+      if (dot) dot.className = `sync-dot ${status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline'}`;
+      const nameEl = homeUserPill.querySelector('.user-name');
+      if (nameEl) nameEl.textContent = user.username;
+    } else {
+      if (dot) dot.className = 'sync-dot offline';
+      const nameEl = homeUserPill.querySelector('.user-name');
+      if (nameEl) nameEl.textContent = 'Sign In';
+    }
+  }
+  homeUserPill?.addEventListener('click', () => openAccountSheet());
+  on('sync-status', syncHomeUser);
+  syncHomeUser();
   let face = makeFace(clockEl, homeFaceType(), HOME_CTX);
   let minuteKey = '';
   let chartW = 0;

@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.11.1';
+const APP_VERSION = '1.11.2';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
 const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
@@ -2592,8 +2592,9 @@ function connectRealtime() {
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.event === 'broadcast' && msg.payload?.payload) {
-        handleRealtimeBroadcast(msg.payload.payload);
+      if (msg.event === 'broadcast') {
+        const payload = msg.payload?.payload || msg.payload;
+        if (payload) handleRealtimeBroadcast(payload);
       }
     } catch {}
   };
@@ -2630,7 +2631,7 @@ function disconnectRealtime() {
 function handleRealtimeBroadcast(payload) {
   if (!payload || payload.clientId === CLIENT_ID) return;
 
-  if (payload.type === 'live_runner') {
+  if (payload.runners || payload.type === 'live_runner') {
     isRemoteUpdate = true;
     try {
       if (payload.runners) {
@@ -2653,11 +2654,12 @@ function handleRealtimeBroadcast(payload) {
     } finally {
       isRemoteUpdate = false;
     }
-  } else if (payload.type === 'data_sync') {
+  } else if (payload.data || payload.type === 'data_sync') {
     isRemoteUpdate = true;
     try {
-      if (payload.data) {
-        replaceAll(payload.data);
+      const syncData = payload.data || payload;
+      if (syncData && (syncData.sessions || syncData.cats || syncData.settings)) {
+        replaceAll(syncData);
         emit('change');
         emit('runner');
         emit('settings');
@@ -2988,7 +2990,7 @@ function scheduleAutoSync() {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     sync({ silent: true });
-  }, 2000);
+  }, 400);
 }
 
 function initAutoSync() {
@@ -3007,6 +3009,13 @@ function initAutoSync() {
       scheduleAutoSync();
     }
   });
+
+  // Fast background polling fallback so devices are always in sync even if WebSockets sleep
+  setInterval(() => {
+    if (!document.hidden && currentUser() && !isRemoteUpdate) {
+      sync({ silent: true });
+    }
+  }, 2500);
 
   window.addEventListener('online', () => {
     connectRealtime();
@@ -4047,11 +4056,12 @@ return { mountStats };
 __m.home = (() => {
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev } = __m.store;
+const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev, on } = __m.store;
 const engine = __m.engine;
 const { makeFace, homeFaceType } = __m.faces;
 const { icon } = __m.ui;
-const { openSessionEditor, openGoalSheet } = __m.sheets;
+const { openSessionEditor, openGoalSheet, openAccountSheet } = __m.sheets;
+const { currentUser, getSyncStatus } = __m.supabase;
 const { esc, fmtDur, fmtTime, fmtDate, pad, clamp, hms, MIN } = __m.util;
 
 const PHONE_24 = new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
@@ -4089,6 +4099,9 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
       <header class="hero-head">
         <div class="hero-when"><span class="greet"></span><span class="home-date"></span></div>
         <div class="topbar-right">
+          <button class="pill user-pill home-user-pill" style="display:none" aria-label="Account">
+            <span class="sync-dot synced"></span><span class="user-name"></span>
+          </button>
           <button class="icon-btn" data-looks aria-label="Looks" title="Looks">${icon('palette')}</button>
           <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
         </div>
@@ -4107,6 +4120,26 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
   const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
+  const homeUserPill = root.querySelector('.home-user-pill');
+  function syncHomeUser() {
+    if (!homeUserPill) return;
+    const user = currentUser();
+    const status = getSyncStatus();
+    homeUserPill.style.display = 'inline-flex';
+    const dot = homeUserPill.querySelector('.sync-dot');
+    if (user) {
+      if (dot) dot.className = `sync-dot ${status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline'}`;
+      const nameEl = homeUserPill.querySelector('.user-name');
+      if (nameEl) nameEl.textContent = user.username;
+    } else {
+      if (dot) dot.className = 'sync-dot offline';
+      const nameEl = homeUserPill.querySelector('.user-name');
+      if (nameEl) nameEl.textContent = 'Sign In';
+    }
+  }
+  homeUserPill?.addEventListener('click', () => openAccountSheet());
+  on('sync-status', syncHomeUser);
+  syncHomeUser();
   let face = makeFace(clockEl, homeFaceType(), HOME_CTX);
   let minuteKey = '';
   let chartW = 0;
@@ -4457,7 +4490,24 @@ function initPWA() {
   });
   addEventListener('appinstalled', () => (deferredPrompt = null));
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Focus: offline mode unavailable', err));
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const worker = reg.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    }).catch((err) => console.warn('Focus: offline mode unavailable', err));
+
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
   }
   // Ask the browser not to clear our data when space runs low (granted automatically for installed apps).
   if (isStandalone()) navigator.storage?.persist?.().catch(() => {});
@@ -5428,14 +5478,14 @@ const bg = __m.background;
 const { fontMetrics, clearMetrics } = __m.flip;
 const { makeFace } = __m.faces;
 const { icon, toast, dialog, overlayOpen, haptic, canVibrate } = __m.ui;
-const { openEditor, openCategories } = __m.sheets;
+const { openEditor, openCategories, openAccountSheet } = __m.sheets;
 const { mountStats } = __m.stats;
 const { mountHome } = __m.home;
 const { openSettings } = __m.settings;
 const { openLooks } = __m.looks;
 const { openCustomize } = __m.customize;
 const { initPWA, notify } = __m.pwa;
-const { initAutoSync } = __m.supabase;
+const { initAutoSync, currentUser, getSyncStatus } = __m.supabase;
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
@@ -5553,7 +5603,28 @@ function applyAll() {
   frame(true);
   updateWakeLock();
   poke();
+  updateUserPill();
 }
+
+const userBtn = $('#btn-user');
+function updateUserPill() {
+  if (!userBtn) return;
+  const user = currentUser();
+  const status = getSyncStatus();
+  userBtn.style.display = 'inline-flex';
+  const dot = userBtn.querySelector('.sync-dot');
+  if (user) {
+    if (dot) dot.className = `sync-dot ${status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline'}`;
+    const nameEl = userBtn.querySelector('.user-name');
+    if (nameEl) nameEl.textContent = user.username;
+  } else {
+    if (dot) dot.className = 'sync-dot offline';
+    const nameEl = userBtn.querySelector('.user-name');
+    if (nameEl) nameEl.textContent = 'Sign In';
+  }
+}
+userBtn?.addEventListener('click', () => openAccountSheet());
+on('sync-status', updateUserPill);
 
 /* ---------- tabs ---------- */
 

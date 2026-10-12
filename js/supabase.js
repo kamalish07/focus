@@ -148,8 +148,9 @@ export function connectRealtime() {
   ws.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.event === 'broadcast' && msg.payload?.payload) {
-        handleRealtimeBroadcast(msg.payload.payload);
+      if (msg.event === 'broadcast') {
+        const payload = msg.payload?.payload || msg.payload;
+        if (payload) handleRealtimeBroadcast(payload);
       }
     } catch {}
   };
@@ -186,7 +187,7 @@ export function disconnectRealtime() {
 function handleRealtimeBroadcast(payload) {
   if (!payload || payload.clientId === CLIENT_ID) return;
 
-  if (payload.type === 'live_runner') {
+  if (payload.runners || payload.type === 'live_runner') {
     isRemoteUpdate = true;
     try {
       if (payload.runners) {
@@ -209,11 +210,12 @@ function handleRealtimeBroadcast(payload) {
     } finally {
       isRemoteUpdate = false;
     }
-  } else if (payload.type === 'data_sync') {
+  } else if (payload.data || payload.type === 'data_sync') {
     isRemoteUpdate = true;
     try {
-      if (payload.data) {
-        replaceAll(payload.data);
+      const syncData = payload.data || payload;
+      if (syncData && (syncData.sessions || syncData.cats || syncData.settings)) {
+        replaceAll(syncData);
         emit('change');
         emit('runner');
         emit('settings');
@@ -544,7 +546,7 @@ export function scheduleAutoSync() {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     sync({ silent: true });
-  }, 2000);
+  }, 400);
 }
 
 export function initAutoSync() {
@@ -563,6 +565,13 @@ export function initAutoSync() {
       scheduleAutoSync();
     }
   });
+
+  // Fast background polling fallback so devices are always in sync even if WebSockets sleep
+  setInterval(() => {
+    if (!document.hidden && currentUser() && !isRemoteUpdate) {
+      sync({ silent: true });
+    }
+  }, 2500);
 
   window.addEventListener('online', () => {
     connectRealtime();

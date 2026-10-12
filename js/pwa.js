@@ -19,7 +19,24 @@ export function initPWA() {
   });
   addEventListener('appinstalled', () => (deferredPrompt = null));
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-    navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Focus: offline mode unavailable', err));
+    navigator.serviceWorker.register('sw.js').then((reg) => {
+      reg.addEventListener('updatefound', () => {
+        const worker = reg.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            worker.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    }).catch((err) => console.warn('Focus: offline mode unavailable', err));
+
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!refreshing) {
+        refreshing = true;
+        window.location.reload();
+      }
+    });
   }
   // Ask the browser not to clear our data when space runs low (granted automatically for installed apps).
   if (isStandalone()) navigator.storage?.persist?.().catch(() => {});

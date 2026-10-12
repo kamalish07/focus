@@ -24,7 +24,7 @@
     try { var bg = localStorage.getItem('focus.bg'); if (bg) document.documentElement.style.background = bg; } catch (e) {}
   </script>
   <!-- Plain (non-module) bundle so the app also opens straight from disk. Rebuild with: node tools/build.mjs -->
-  <script defer src="js/app.bundle.js"></script>
+  <script defer src="js/app.bundle.js?v=1.11.2"></script>
 </head>
 <body>
   <div id="app" class="app layout-col">
@@ -40,6 +40,9 @@
             <span class="dot"></span><span class="pill-name">Study</span><span data-icon="chevronRight"></span>
           </button>
           <div class="topbar-right">
+            <button id="btn-user" class="pill user-pill" aria-label="Account" style="display:none">
+              <span class="sync-dot synced"></span><span class="user-name"></span>
+            </button>
             <button class="icon-btn" data-open-looks data-icon="palette" aria-label="Looks" title="Looks"></button>
             <button class="icon-btn" data-open-settings data-icon="settings" aria-label="Settings" title="Settings"></button>
           </div>
