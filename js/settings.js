@@ -3,12 +3,13 @@ import { SOUNDS, APP_VERSION } from './config.js';
 import { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } from './ui.js';
 import { looksPanel, mountPreview } from './looks.js';
 import { openCustomize } from './customize.js';
-import { openCategories } from './sheets.js';
+import { openCategories, openAccountSheet } from './sheets.js';
 import * as engine from './engine.js';
 import * as audio from './audio.js';
 import * as pwa from './pwa.js';
 import { is24 } from './home.js';
-import { esc, getPath, setPath, downloadFile } from './util.js';
+import { esc, getPath, setPath, downloadFile, fmtTime } from './util.js';
+import { getSyncStatus, sync } from './supabase.js';
 
 const BG_SOUNDS = [
   ['silent', 'Silent (recommended)'],
@@ -19,6 +20,7 @@ const BG_SOUNDS = [
 ];
 
 const AREAS = [
+  ['account', 'Account'],
   ['looks', 'Looks'],
   ['clock', 'Clock'],
   ['timers', 'Timers'],
@@ -51,11 +53,54 @@ export function openSettings() {
       previewCleanup?.();
       looks?.destroy();
       areaIO?.disconnect();
+      unsubSync?.();
       pop();
     },
   });
   const scroller = pg.body;
   const root = pg.body.querySelector('.settings');
+  const unsubSync = on('sync-status', () => {
+    if (document.body.contains(root)) render();
+  });
+
+  function accountSection() {
+    const status = getSyncStatus();
+    const user = status.user;
+    if (user) {
+      const dot = status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
+      const label = status.state === 'syncing' ? 'Syncing...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
+      return `
+        <div class="account-card">
+          <div class="account-info">
+            <span class="account-icon">${icon('user')}</span>
+            <div>
+              <div class="account-name">${esc(user.username)}</div>
+              <div class="account-meta"><span class="sync-dot ${dot}"></span><span>${esc(label)}</span></div>
+            </div>
+          </div>
+          <div class="account-actions">
+            <button class="btn sm primary" data-sync-now>${icon('sync')}<span>Sync</span></button>
+            <button class="btn sm" data-manage-account>Manage</button>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="account-card">
+        <div class="account-info">
+          <span class="account-icon muted">${icon('user')}</span>
+          <div>
+            <div class="account-name">Not signed in</div>
+            <div class="account-meta">Data saved on this device only</div>
+          </div>
+        </div>
+        <div class="account-actions">
+          <button class="btn sm primary" data-open-auth>Sign in / Create ID</button>
+        </div>
+      </div>
+      <p class="hint small">Sign in on your laptop and phone to sync your focus sessions, goals and settings.</p>
+    `;
+  }
 
   function notifCtl() {
     if (!('Notification' in window)) return '<span class="muted">Not supported</span>';
@@ -77,6 +122,10 @@ export function openSettings() {
     return `
       <div class="preview"><div class="clock preview-clock"></div></div>
       <nav class="set-nav" aria-label="Settings sections">${AREAS.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join('')}</nav>
+
+      <div class="set-area area-account" data-area="account">
+        ${group('Cloud Sync & Account', accountSection())}
+      </div>
 
       <div class="set-area area-looks" data-area="looks">
         <section class="set-sec"><h3 class="group-title">Looks</h3><div class="group pad looks-panel"></div></section>
@@ -219,6 +268,21 @@ export function openSettings() {
     if (jump) {
       const area = root.querySelector(`[data-area="${jump.dataset.jump}"]`);
       area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (e.target.closest('[data-open-auth]') || e.target.closest('[data-manage-account]')) {
+      return openAccountSheet(() => render());
+    }
+    if (e.target.closest('[data-sync-now]')) {
+      const btn = e.target.closest('[data-sync-now]');
+      btn.disabled = true;
+      toast('Syncing with cloud...');
+      sync().then((res) => {
+        btn.disabled = false;
+        if (res.ok) toast('Synced successfully');
+        else toast(`Sync failed: ${res.error || res.reason}`);
+        render();
+      });
       return;
     }
     if (e.target.closest('[data-cats]')) return openCategories();

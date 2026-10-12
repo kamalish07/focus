@@ -5,7 +5,11 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.10.2';
+const APP_VERSION = '1.11.0';
+
+/** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
+const SUPABASE_URL = '';
+const SUPABASE_ANON_KEY = '';
 
 /** Colour themes. `bg` = page, `card` = flip cards, `digit` = numbers, `accent` = highlights. */
 const THEMES = {
@@ -115,7 +119,7 @@ const TEMPLATES = [
 ];
 
 const templateLook = (t) => ({ ...LOOK_DEFAULTS, ...t.look });
-return { APP_VERSION, THEMES, themeColors, FONTS, fontById, PALETTE, SOUNDS, TIMER_PRESETS, LOOK_DEFAULTS, LOOK_KEYS, FACE_COLORS, AURORAS, TEMPLATES, templateLook };
+return { APP_VERSION, SUPABASE_URL, SUPABASE_ANON_KEY, THEMES, themeColors, FONTS, fontById, PALETTE, SOUNDS, TIMER_PRESETS, LOOK_DEFAULTS, LOOK_KEYS, FACE_COLORS, AURORAS, TEMPLATES, templateLook };
 })();
 
 // ---------- util.js ----------
@@ -2025,6 +2029,11 @@ const PATHS = {
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   collapse: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   face: '<rect x="3" y="4" width="8" height="16" rx="2"/><rect x="13" y="4" width="8" height="16" rx="2"/><path d="M3 12h8M13 12h8"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>',
+  cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  sync: '<path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
 };
 
 const icon = (name, cls = '') =>
@@ -2431,13 +2440,338 @@ function bindControls(root, { get, set }) {
 return { icon, canVibrate, haptic, overlayOpen, sheet, dialog, confirmDialog, toast, wheel, hmsWheels, switchEl, segEl, fmtStep, stepperEl, bindControls };
 })();
 
+// ---------- supabase.js ----------
+__m.supabase = (() => {
+// Supabase Authentication & Real-time Cloud Sync for Focus.
+// Allows users to create an account with username & password,
+// and sync focus sessions, categories, and settings across laptop & mobile.
+const { data, replaceAll, saveSoon, on, emit } = __m.store;
+const { SUPABASE_URL: DEF_URL, SUPABASE_ANON_KEY: DEF_KEY } = __m.config;
+
+const KEY_URL = 'focus.supabase.url';
+const KEY_KEY = 'focus.supabase.key';
+const KEY_SESSION = 'focus.supabase.session';
+
+let syncState = 'idle'; // idle | syncing | synced | error | offline
+let lastSyncTime = 0;
+let lastError = '';
+let syncTimer = 0;
+
+function getSupabaseConfig() {
+  const url = (localStorage.getItem(KEY_URL) || DEF_URL || '').trim().replace(/\/+$/, '');
+  const key = (localStorage.getItem(KEY_KEY) || DEF_KEY || '').trim();
+  return { url, key };
+}
+
+function setSupabaseConfig(url, key) {
+  if (url) localStorage.setItem(KEY_URL, url.trim().replace(/\/+$/, ''));
+  else localStorage.removeItem(KEY_URL);
+  if (key) localStorage.setItem(KEY_KEY, key.trim());
+  else localStorage.removeItem(KEY_KEY);
+  emit('sync-status');
+}
+
+function isConfigured() {
+  const { url, key } = getSupabaseConfig();
+  return !!url && !!key;
+}
+
+function getStoredSession() {
+  try {
+    const raw = localStorage.getItem(KEY_SESSION);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(sess) {
+  if (sess) localStorage.setItem(KEY_SESSION, JSON.stringify(sess));
+  else localStorage.removeItem(KEY_SESSION);
+  emit('sync-status');
+}
+
+function currentUser() {
+  const s = getStoredSession();
+  if (!s || !s.user) return null;
+  const meta = s.user.user_metadata || {};
+  const email = s.user.email || '';
+  const username = meta.username || (email.includes('@focus.app') ? email.split('@')[0] : email);
+  return { id: s.user.id, email, username };
+}
+
+async function refreshSessionIfNeeded(sess) {
+  if (!sess || !sess.refresh_token) return null;
+  const now = Date.now();
+  // Refresh if expiring within 2 minutes
+  if (sess.expires_at && sess.expires_at > now + 120000) return sess;
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key) return sess;
+
+  try {
+    const res = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { apikey: key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: sess.refresh_token }),
+    });
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 401) saveSession(null);
+      return null;
+    }
+    const data = await res.json();
+    const updated = {
+      ...data,
+      expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+    };
+    saveSession(updated);
+    return updated;
+  } catch {
+    return sess;
+  }
+}
+
+function normalizeIdentity(identity) {
+  const trimmed = identity.trim();
+  if (trimmed.includes('@')) {
+    return { email: trimmed, username: trimmed.split('@')[0] };
+  }
+  return { email: `${trimmed.toLowerCase()}@focus.app`, username: trimmed };
+}
+
+async function signUp(identity, password) {
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key) throw new Error('Supabase project URL and anon key are required');
+  const { email, username } = normalizeIdentity(identity);
+
+  const res = await fetch(`${url}/auth/v1/signup`, {
+    method: 'POST',
+    headers: { apikey: key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password,
+      data: { username },
+    }),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error_description || body.msg || body.message || 'Failed to create account');
+
+  if (body.access_token) {
+    const sess = {
+      ...body,
+      expires_at: Date.now() + (body.expires_in || 3600) * 1000,
+    };
+    saveSession(sess);
+    sync({ silent: true });
+    return { user: body.user, session: sess, autoLoggedIn: true };
+  }
+  return { user: body.user || body, session: null, autoLoggedIn: false };
+}
+
+async function signIn(identity, password) {
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key) throw new Error('Supabase project URL and anon key are required');
+  const { email } = normalizeIdentity(identity);
+
+  const res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error_description || body.msg || body.message || 'Invalid username or password');
+
+  const sess = {
+    ...body,
+    expires_at: Date.now() + (body.expires_in || 3600) * 1000,
+  };
+  saveSession(sess);
+  sync({ silent: true });
+  return { user: body.user, session: sess };
+}
+
+async function signOut() {
+  const sess = getStoredSession();
+  const { url, key } = getSupabaseConfig();
+  if (sess && url && key) {
+    fetch(`${url}/auth/v1/logout`, {
+      method: 'POST',
+      headers: { apikey: key, Authorization: `Bearer ${sess.access_token}` },
+    }).catch(() => {});
+  }
+  saveSession(null);
+  syncState = 'idle';
+  lastError = '';
+  emit('sync-status');
+}
+
+function mergeUserData(local, cloud) {
+  if (!cloud) return local;
+
+  // 1. Sessions: Union by id, keeping latest edited or recorded
+  const sessionMap = new Map();
+  for (const s of cloud.sessions || []) {
+    if (s && s.id) sessionMap.set(s.id, s);
+  }
+  for (const s of local.sessions || []) {
+    if (!s || !s.id) continue;
+    if (!sessionMap.has(s.id)) {
+      sessionMap.set(s.id, s);
+    } else {
+      const existing = sessionMap.get(s.id);
+      const localTime = s.editedAt || s.start || 0;
+      const existingTime = existing.editedAt || existing.start || 0;
+      if (localTime >= existingTime) sessionMap.set(s.id, s);
+    }
+  }
+  const mergedSessions = Array.from(sessionMap.values()).sort((a, b) => (a.start || 0) - (b.start || 0));
+
+  // 2. Categories: Union by id
+  const catMap = new Map();
+  for (const c of cloud.cats || []) {
+    if (c && c.id) catMap.set(c.id, c);
+  }
+  for (const c of local.cats || []) {
+    if (c && c.id && !catMap.has(c.id)) catMap.set(c.id, c);
+  }
+  const mergedCats = Array.from(catMap.values());
+
+  // 3. Settings: overlay cloud settings on top of local
+  const mergedSettings = { ...local.settings, ...(cloud.settings || {}) };
+
+  return {
+    ...local,
+    sessions: mergedSessions,
+    cats: mergedCats.length ? mergedCats : local.cats,
+    settings: mergedSettings,
+  };
+}
+
+async function sync(options = {}) {
+  let sess = getStoredSession();
+  if (!sess) {
+    syncState = 'idle';
+    emit('sync-status');
+    return { ok: false, reason: 'not_logged_in' };
+  }
+
+  sess = await refreshSessionIfNeeded(sess);
+  if (!sess) {
+    syncState = 'error';
+    lastError = 'Session expired, please sign in again';
+    emit('sync-status');
+    return { ok: false, reason: 'session_expired' };
+  }
+
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key) return { ok: false, reason: 'not_configured' };
+
+  syncState = 'syncing';
+  emit('sync-status');
+
+  try {
+    // 1. Fetch remote data from user_data table
+    const getRes = await fetch(`${url}/rest/v1/user_data?select=*`, {
+      method: 'GET',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${sess.access_token}`,
+      },
+    });
+
+    if (!getRes.ok) {
+      const err = await getRes.json().catch(() => ({}));
+      throw new Error(err.message || `Database error (${getRes.status})`);
+    }
+
+    const rows = await getRes.json();
+    const cloudRow = rows && rows[0];
+
+    // 2. Merge local and cloud data
+    const merged = mergeUserData(data, cloudRow);
+    replaceAll(merged);
+
+    // 3. Push merged data back to cloud
+    const postRes = await fetch(`${url}/rest/v1/user_data`, {
+      method: 'POST',
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${sess.access_token}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        user_id: sess.user.id,
+        settings: merged.settings,
+        cats: merged.cats,
+        sessions: merged.sessions,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+
+    if (!postRes.ok) {
+      const err = await postRes.json().catch(() => ({}));
+      throw new Error(err.message || 'Failed to save to cloud');
+    }
+
+    syncState = 'synced';
+    lastSyncTime = Date.now();
+    lastError = '';
+    emit('sync-status');
+    return { ok: true, lastSyncTime };
+  } catch (e) {
+    if (!navigator.onLine) {
+      syncState = 'offline';
+      lastError = 'Offline - will sync when reconnected';
+    } else {
+      syncState = 'error';
+      lastError = e.message || 'Sync failed';
+    }
+    emit('sync-status');
+    return { ok: false, error: lastError };
+  }
+}
+
+function getSyncStatus() {
+  return {
+    state: syncState,
+    lastSync: lastSyncTime,
+    error: lastError,
+    user: currentUser(),
+    configured: isConfigured(),
+  };
+}
+
+function scheduleAutoSync() {
+  if (!currentUser()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    sync({ silent: true });
+  }, 4000);
+}
+
+function initAutoSync() {
+  on('change', () => scheduleAutoSync());
+  window.addEventListener('online', () => sync({ silent: true }));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && currentUser()) sync({ silent: true });
+  });
+  if (currentUser()) {
+    setTimeout(() => sync({ silent: true }), 1000);
+  }
+}
+return { getSupabaseConfig, setSupabaseConfig, isConfigured, getStoredSession, currentUser, signUp, signIn, signOut, mergeUserData, sync, getSyncStatus, scheduleAutoSync, initAutoSync };
+})();
+
 // ---------- sheets.js ----------
 __m.sheets = (() => {
-const { data, save, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
+const { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
 const { PALETTE, TIMER_PRESETS } = __m.config;
 const engine = __m.engine;
 const { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } = __m.ui;
 const { esc, fmtDur, fmtTime, pad, uid, getPath, setPath, MIN, HOUR, SEC } = __m.util;
+const { getSupabaseConfig, setSupabaseConfig, isConfigured, getSyncStatus, signIn, signUp, signOut, sync } = __m.supabase;
 
 const minus = (v) => (v > 0 ? `+${v}` : `−${Math.abs(v)}`);
 const adjustChips = (list) =>
@@ -2908,7 +3242,235 @@ function openSessionEditor(s, dayK, onDone) {
     toast(isNew ? `Added ${fmtDur(newDur)} to ${catById(catId).name}` : 'Session updated');
   });
 }
-return { openEditor, openGoalSheet, openCategories, deleteCategory, openCategoryEditor, openSessionEditor };
+
+/* ---------- account & cloud sync ---------- */
+
+function openAccountSheet(onDone) {
+  let activeTab = 'signin';
+  let showConfig = false;
+  let showSql = false;
+
+  const SQL_SNIPPET = `create table if not exists user_data (
+  user_id uuid references auth.users not null primary key,
+  settings jsonb,
+  cats jsonb,
+  sessions jsonb,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table user_data enable row level security;
+
+create policy "Users can manage own data" on user_data
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);`;
+
+  function renderBody() {
+    const status = getSyncStatus();
+    const user = status.user;
+    const cfg = getSupabaseConfig();
+    const hasConfig = isConfigured();
+
+    if (user) {
+      const syncDotClass = status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
+      const syncLabel = status.state === 'syncing' ? 'Syncing now...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
+
+      return `
+        <div class="account-card" style="margin-bottom:16px">
+          <div class="account-info">
+            <span class="account-icon">${icon('user')}</span>
+            <div>
+              <div class="account-name">${esc(user.username)}</div>
+              <div class="account-meta"><span class="sync-dot ${syncDotClass}"></span><span>${esc(syncLabel)}</span></div>
+            </div>
+          </div>
+        </div>
+        <p class="hint">Your focus time, sessions, and settings sync automatically between your laptop and phone.</p>
+        <div class="sheet-actions" style="margin-top:16px">
+          <button class="btn primary" data-sync-now>${icon('sync')}<span>Sync now</span></button>
+          <button class="btn danger" data-sign-out>Sign out</button>
+        </div>
+        <div style="margin-top:20px;border-top:1px solid var(--line);padding-top:14px">
+          <button class="btn sm ghost block" data-toggle-cfg>${icon('settings')}<span>${showConfig ? 'Hide connection settings' : 'View connection settings'}</span></button>
+          ${showConfig ? `
+            <div style="margin-top:12px">
+              <label class="field"><span class="field-label">Supabase Project URL</span><input class="input" data-cfg-url value="${esc(cfg.url)}"></label>
+              <label class="field"><span class="field-label">Anon Public Key</span><input class="input" type="password" data-cfg-key value="${esc(cfg.key)}"></label>
+              <button class="btn sm" data-save-cfg>Save settings</button>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    if (!hasConfig) {
+      return `
+        <div style="text-align:center;padding:10px 0 16px">
+          <div class="account-icon" style="margin:0 auto 12px;width:52px;height:52px">${icon('cloud')}</div>
+          <h3 style="margin:0 0 6px">Connect Cloud Sync</h3>
+          <p class="hint" style="margin:0 auto;max-width:320px">To sync across laptop and mobile, connect your free Supabase project.</p>
+        </div>
+        <div class="auth-err" hidden></div>
+        <label class="field"><span class="field-label">Project URL</span><input class="input" data-cfg-url placeholder="https://xyzcompany.supabase.co" value="${esc(cfg.url)}"></label>
+        <label class="field"><span class="field-label">Anon Public Key</span><input class="input" data-cfg-key placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..." value="${esc(cfg.key)}"></label>
+        <button class="btn primary block" data-save-cfg>Continue</button>
+        <div class="setup-guide">
+          <strong>How to get your free credentials in 1 minute:</strong>
+          <ol>
+            <li>Go to <a href="https://supabase.com" target="_blank" rel="noopener" style="color:var(--accent)">supabase.com</a> and create a free project.</li>
+            <li>In <strong>Project Settings → API</strong>, copy the Project URL and anon key.</li>
+            <li>In <strong>SQL Editor</strong>, run the setup script:</li>
+          </ol>
+          <button class="btn sm ghost" data-toggle-sql>${showSql ? 'Hide SQL script' : 'Show SQL script'}</button>
+          ${showSql ? `
+            <pre class="sql-box">${esc(SQL_SNIPPET)}</pre>
+            <button class="btn sm" data-copy-sql>${icon('copy')}<span>Copy SQL</span></button>
+          ` : ''}
+        </div>
+      `;
+    }
+
+    return `
+      <div class="auth-tabs">
+        <div class="auth-tab ${activeTab === 'signin' ? 'active' : ''}" data-tab="signin">Sign In</div>
+        <div class="auth-tab ${activeTab === 'signup' ? 'active' : ''}" data-tab="signup">Create ID</div>
+      </div>
+      <div class="auth-err" hidden></div>
+      <label class="field"><span class="field-label">Username or Email</span><input class="input" data-auth-id autocomplete="username" placeholder="e.g. kamal or you@example.com"></label>
+      <label class="field"><span class="field-label">Password</span><input class="input" type="password" data-auth-pass autocomplete="current-password" placeholder="At least 6 characters"></label>
+      <button class="btn primary block" data-auth-submit>${activeTab === 'signin' ? 'Sign In' : 'Create Account'}</button>
+      <p class="hint small center" style="margin-top:14px">${activeTab === 'signin' ? 'Sign in with the same ID on your laptop and phone to sync.' : 'Create an ID to access your focus stats from anywhere.'}</p>
+      <div style="margin-top:16px;text-align:center">
+        <button class="btn sm ghost" data-toggle-cfg style="border:none">Change Supabase connection</button>
+      </div>
+      ${showConfig ? `
+        <div style="margin-top:12px;background:var(--surface);padding:12px;border-radius:12px;border:1px solid var(--line)">
+          <label class="field"><span class="field-label">Project URL</span><input class="input" data-cfg-url value="${esc(cfg.url)}"></label>
+          <label class="field"><span class="field-label">Anon Key</span><input class="input" type="password" data-cfg-key value="${esc(cfg.key)}"></label>
+          <button class="btn sm" data-save-cfg>Update URL & Key</button>
+        </div>
+      ` : ''}
+    `;
+  }
+
+  const sh = sheet({
+    title: 'Cloud Sync & Account',
+    body: `<div class="auth-wrap">${renderBody()}</div>`,
+  });
+
+  function update() {
+    const wrap = sh.body.querySelector('.auth-wrap');
+    if (wrap) wrap.innerHTML = renderBody();
+  }
+
+  sh.body.addEventListener('click', async (e) => {
+    const tabEl = e.target.closest('[data-tab]');
+    if (tabEl) {
+      activeTab = tabEl.dataset.tab;
+      update();
+      return;
+    }
+
+    if (e.target.closest('[data-toggle-cfg]')) {
+      showConfig = !showConfig;
+      update();
+      return;
+    }
+
+    if (e.target.closest('[data-toggle-sql]')) {
+      showSql = !showSql;
+      update();
+      return;
+    }
+
+    if (e.target.closest('[data-copy-sql]')) {
+      navigator.clipboard?.writeText(SQL_SNIPPET);
+      toast('SQL script copied to clipboard!');
+      return;
+    }
+
+    if (e.target.closest('[data-save-cfg]')) {
+      const u = sh.body.querySelector('[data-cfg-url]')?.value || '';
+      const k = sh.body.querySelector('[data-cfg-key]')?.value || '';
+      if (!u.trim() || !k.trim()) return toast('Please enter both Project URL and Anon key');
+      setSupabaseConfig(u, k);
+      showConfig = false;
+      toast('Supabase configured!');
+      update();
+      return;
+    }
+
+    if (e.target.closest('[data-sync-now]')) {
+      const btn = e.target.closest('[data-sync-now]');
+      btn.disabled = true;
+      toast('Syncing with cloud...');
+      const res = await sync();
+      btn.disabled = false;
+      if (res.ok) toast('Synced successfully');
+      else toast(`Sync failed: ${res.error || res.reason}`);
+      update();
+      onDone?.();
+      return;
+    }
+
+    if (e.target.closest('[data-sign-out]')) {
+      if (await confirmDialog({ title: 'Sign out?', message: 'Your data on this device will stay intact.', ok: 'Sign out' })) {
+        await signOut();
+        toast('Signed out');
+        update();
+        onDone?.();
+      }
+      return;
+    }
+
+    if (e.target.closest('[data-auth-submit]')) {
+      const idEl = sh.body.querySelector('[data-auth-id]');
+      const passEl = sh.body.querySelector('[data-auth-pass]');
+      const errEl = sh.body.querySelector('.auth-err');
+      const submitBtn = e.target.closest('[data-auth-submit]');
+      if (!idEl || !passEl) return;
+
+      const identity = idEl.value.trim();
+      const password = passEl.value;
+
+      if (!identity) return toast('Please enter your username or email');
+      if (password.length < 6) return toast('Password must be at least 6 characters');
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = activeTab === 'signin' ? 'Signing in...' : 'Creating account...';
+      if (errEl) errEl.hidden = true;
+
+      try {
+        if (activeTab === 'signin') {
+          const res = await signIn(identity, password);
+          toast(`Signed in as ${res.user.email?.split('@')[0] || 'User'}`);
+        } else {
+          const res = await signUp(identity, password);
+          if (res.autoLoggedIn) {
+            toast(`Account created for ${identity}!`);
+          } else {
+            toast('Account created! Please check your email to confirm, then sign in.');
+            activeTab = 'signin';
+          }
+        }
+        update();
+        onDone?.();
+      } catch (err) {
+        if (errEl) {
+          errEl.textContent = err.message || 'Authentication error';
+          errEl.hidden = false;
+        } else {
+          toast(err.message || 'Authentication error');
+        }
+        submitBtn.disabled = false;
+        submitBtn.textContent = activeTab === 'signin' ? 'Sign In' : 'Create Account';
+      }
+    }
+  });
+
+  on('sync-status', () => {
+    if (document.body.contains(sh.el)) update();
+  });
+}
+return { openEditor, openGoalSheet, openCategories, deleteCategory, openCategoryEditor, openSessionEditor, openAccountSheet };
 })();
 
 // ---------- stats.js ----------
@@ -4309,12 +4871,13 @@ const { SOUNDS, APP_VERSION } = __m.config;
 const { sheet, icon, switchEl, segEl, stepperEl, bindControls, toast, confirmDialog } = __m.ui;
 const { looksPanel, mountPreview } = __m.looks;
 const { openCustomize } = __m.customize;
-const { openCategories } = __m.sheets;
+const { openCategories, openAccountSheet } = __m.sheets;
 const engine = __m.engine;
 const audio = __m.audio;
 const pwa = __m.pwa;
 const { is24 } = __m.home;
-const { esc, getPath, setPath, downloadFile } = __m.util;
+const { esc, getPath, setPath, downloadFile, fmtTime } = __m.util;
+const { getSyncStatus, sync } = __m.supabase;
 
 const BG_SOUNDS = [
   ['silent', 'Silent (recommended)'],
@@ -4325,6 +4888,7 @@ const BG_SOUNDS = [
 ];
 
 const AREAS = [
+  ['account', 'Account'],
   ['looks', 'Looks'],
   ['clock', 'Clock'],
   ['timers', 'Timers'],
@@ -4357,11 +4921,54 @@ function openSettings() {
       previewCleanup?.();
       looks?.destroy();
       areaIO?.disconnect();
+      unsubSync?.();
       pop();
     },
   });
   const scroller = pg.body;
   const root = pg.body.querySelector('.settings');
+  const unsubSync = on('sync-status', () => {
+    if (document.body.contains(root)) render();
+  });
+
+  function accountSection() {
+    const status = getSyncStatus();
+    const user = status.user;
+    if (user) {
+      const dot = status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
+      const label = status.state === 'syncing' ? 'Syncing...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
+      return `
+        <div class="account-card">
+          <div class="account-info">
+            <span class="account-icon">${icon('user')}</span>
+            <div>
+              <div class="account-name">${esc(user.username)}</div>
+              <div class="account-meta"><span class="sync-dot ${dot}"></span><span>${esc(label)}</span></div>
+            </div>
+          </div>
+          <div class="account-actions">
+            <button class="btn sm primary" data-sync-now>${icon('sync')}<span>Sync</span></button>
+            <button class="btn sm" data-manage-account>Manage</button>
+          </div>
+        </div>
+      `;
+    }
+    return `
+      <div class="account-card">
+        <div class="account-info">
+          <span class="account-icon muted">${icon('user')}</span>
+          <div>
+            <div class="account-name">Not signed in</div>
+            <div class="account-meta">Data saved on this device only</div>
+          </div>
+        </div>
+        <div class="account-actions">
+          <button class="btn sm primary" data-open-auth>Sign in / Create ID</button>
+        </div>
+      </div>
+      <p class="hint small">Sign in on your laptop and phone to sync your focus sessions, goals and settings.</p>
+    `;
+  }
 
   function notifCtl() {
     if (!('Notification' in window)) return '<span class="muted">Not supported</span>';
@@ -4383,6 +4990,10 @@ function openSettings() {
     return `
       <div class="preview"><div class="clock preview-clock"></div></div>
       <nav class="set-nav" aria-label="Settings sections">${AREAS.map(([id, l]) => `<button data-jump="${id}">${l}</button>`).join('')}</nav>
+
+      <div class="set-area area-account" data-area="account">
+        ${group('Cloud Sync & Account', accountSection())}
+      </div>
 
       <div class="set-area area-looks" data-area="looks">
         <section class="set-sec"><h3 class="group-title">Looks</h3><div class="group pad looks-panel"></div></section>
@@ -4527,6 +5138,21 @@ function openSettings() {
       area?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
+    if (e.target.closest('[data-open-auth]') || e.target.closest('[data-manage-account]')) {
+      return openAccountSheet(() => render());
+    }
+    if (e.target.closest('[data-sync-now]')) {
+      const btn = e.target.closest('[data-sync-now]');
+      btn.disabled = true;
+      toast('Syncing with cloud...');
+      sync().then((res) => {
+        btn.disabled = false;
+        if (res.ok) toast('Synced successfully');
+        else toast(`Sync failed: ${res.error || res.reason}`);
+        render();
+      });
+      return;
+    }
     if (e.target.closest('[data-cats]')) return openCategories();
     if (e.target.closest('[data-test-sound]')) {
       audio.unlock();
@@ -4633,6 +5259,7 @@ const { openSettings } = __m.settings;
 const { openLooks } = __m.looks;
 const { openCustomize } = __m.customize;
 const { initPWA, notify } = __m.pwa;
+const { initAutoSync } = __m.supabase;
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
@@ -5266,6 +5893,7 @@ if (DEMO) {
 }
 setInterval(frame, 150);
 initPWA();
+initAutoSync();
 return {  };
 })();
 })();

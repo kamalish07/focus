@@ -14,6 +14,7 @@ import { openSettings } from './settings.js';
 import { openLooks } from './looks.js';
 import { openCustomize } from './customize.js';
 import { initPWA, notify } from './pwa.js';
+import { initAutoSync } from './supabase.js';
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
@@ -647,3 +648,4 @@ if (DEMO) {
 }
 setInterval(frame, 150);
 initPWA();
+initAutoSync();
