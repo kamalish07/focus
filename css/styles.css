@@ -1084,24 +1084,6 @@ a.btn { text-decoration: none; }
 }
 .center { text-align: center; }
 
-.user-pill {
-  height: 38px;
-  padding: 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  max-width: 130px;
-  overflow: hidden;
-}
-.user-pill:active { transform: scale(.96); }
-.user-pill .sync-dot { width: 7px; height: 7px; flex-shrink: 0; }
-.user-pill .user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 
 

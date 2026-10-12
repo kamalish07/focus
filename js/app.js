@@ -7,14 +7,14 @@ import * as bg from './background.js';
 import { fontMetrics, clearMetrics } from './flip.js';
 import { makeFace } from './faces.js';
 import { icon, toast, dialog, overlayOpen, haptic, canVibrate } from './ui.js';
-import { openEditor, openCategories, openAccountSheet } from './sheets.js';
+import { openEditor, openCategories } from './sheets.js';
 import { mountStats } from './stats.js';
 import { mountHome } from './home.js';
 import { openSettings } from './settings.js';
 import { openLooks } from './looks.js';
 import { openCustomize } from './customize.js';
 import { initPWA, notify } from './pwa.js';
-import { initAutoSync, currentUser, getSyncStatus } from './supabase.js';
+import { initAutoSync } from './supabase.js';
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
@@ -132,28 +132,7 @@ function applyAll() {
   frame(true);
   updateWakeLock();
   poke();
-  updateUserPill();
 }
-
-const userBtn = $('#btn-user');
-function updateUserPill() {
-  if (!userBtn) return;
-  const user = currentUser();
-  const status = getSyncStatus();
-  userBtn.style.display = 'inline-flex';
-  const dot = userBtn.querySelector('.sync-dot');
-  if (user) {
-    if (dot) dot.className = `sync-dot ${status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline'}`;
-    const nameEl = userBtn.querySelector('.user-name');
-    if (nameEl) nameEl.textContent = user.username;
-  } else {
-    if (dot) dot.className = 'sync-dot offline';
-    const nameEl = userBtn.querySelector('.user-name');
-    if (nameEl) nameEl.textContent = 'Sign In';
-  }
-}
-userBtn?.addEventListener('click', () => openAccountSheet());
-on('sync-status', updateUserPill);
 
 /* ---------- tabs ---------- */
 
@@ -587,6 +566,8 @@ on('change', () => {
   if (tab === 'home') home.refresh();
 });
 on('runner', () => {
+  const a = engine.active();
+  if (a && isModeTab() && tab !== a) showTab(a);
   updateWakeLock();
   poke();
   bg.sync();

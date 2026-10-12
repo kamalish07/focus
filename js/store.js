@@ -106,8 +106,9 @@ function normalize(d) {
   const sessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
   const ids = new Set(sessions.map((s) => s.id));
 
+  const existingRunners = d.runners || (typeof data !== 'undefined' && data?.runners ? data.runners : null);
   const runners = {};
-  for (const m of MODES) runners[m] = { ...freshRunner(m, settings), ...(d.runners?.[m] || {}), mode: m };
+  for (const m of MODES) runners[m] = { ...freshRunner(m, settings), ...(existingRunners?.[m] || {}), mode: m };
   // Data from version 1 had a single shared runner.
   if (d.runner && !d.runners && MODES.includes(d.runner.mode)) Object.assign(runners[d.runner.mode], d.runner);
   let oneRunning = false;

@@ -1,5 +1,5 @@
 // Offline support. Bump VERSION whenever you change the app files so phones pick up the update.
-const VERSION = 'focus-v1.11.2';
+const VERSION = 'focus-v1.11.3';
 const FONT_CACHE = 'focus-fonts';
 const SHELL = [
   './',

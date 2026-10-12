@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.11.2';
+const APP_VERSION = '1.11.3';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
 const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
@@ -307,8 +307,9 @@ function normalize(d) {
   const sessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
   const ids = new Set(sessions.map((s) => s.id));
 
+  const existingRunners = d.runners || (typeof data !== 'undefined' && data?.runners ? data.runners : null);
   const runners = {};
-  for (const m of MODES) runners[m] = { ...freshRunner(m, settings), ...(d.runners?.[m] || {}), mode: m };
+  for (const m of MODES) runners[m] = { ...freshRunner(m, settings), ...(existingRunners?.[m] || {}), mode: m };
   // Data from version 1 had a single shared runner.
   if (d.runner && !d.runners && MODES.includes(d.runner.mode)) Object.assign(runners[d.runner.mode], d.runner);
   let oneRunning = false;
@@ -2635,7 +2636,14 @@ function handleRealtimeBroadcast(payload) {
     isRemoteUpdate = true;
     try {
       if (payload.runners) {
-        Object.assign(data.runners, payload.runners);
+        for (const m of ['stopwatch', 'timer', 'pomodoro']) {
+          const remote = payload.runners[m];
+          if (!remote) continue;
+          const local = data.runners[m];
+          if (!local || (remote.touched || 0) >= (local.touched || 0) || remote.runStart != null) {
+            data.runners[m] = { ...data.runners[m], ...remote, mode: m };
+          }
+        }
       }
       if (payload.cat && payload.cat !== data.settings.cat) {
         data.settings.cat = payload.cat;
@@ -2659,7 +2667,14 @@ function handleRealtimeBroadcast(payload) {
     try {
       const syncData = payload.data || payload;
       if (syncData && (syncData.sessions || syncData.cats || syncData.settings)) {
-        replaceAll(syncData);
+        const cloudRunners = syncData.runners || syncData.settings?._runners || null;
+        const merged = mergeUserData(data, {
+          settings: syncData.settings,
+          cats: syncData.cats,
+          sessions: syncData.sessions,
+          runners: cloudRunners,
+        });
+        replaceAll(merged);
         emit('change');
         emit('runner');
         emit('settings');
@@ -2713,7 +2728,12 @@ function broadcastDataSync(fullData) {
       payload: {
         clientId: CLIENT_ID,
         type: 'data_sync',
-        data: fullData,
+        data: {
+          settings: fullData.settings,
+          cats: fullData.cats,
+          sessions: fullData.sessions,
+          runners: fullData.runners || data.runners,
+        },
         sentAt: Date.now(),
       },
     },
@@ -2737,11 +2757,13 @@ async function pullCloudData(sess) {
       const row = rows[0];
       isRemoteUpdate = true;
       try {
-        replaceAll({
-          settings: row.settings || data.settings,
-          cats: row.cats || data.cats,
+        const merged = mergeUserData(data, {
+          settings: row.settings || {},
+          cats: row.cats || [],
           sessions: row.sessions || [],
+          runners: row.settings?._runners || row.runners || null,
         });
+        replaceAll(merged);
         emit('change');
         emit('runner');
         emit('settings');
@@ -2754,6 +2776,40 @@ async function pullCloudData(sess) {
     console.warn('Pull cloud data failed:', e);
   }
   return null;
+}
+
+function sessionLatestTime(s) {
+  if (!s) return 0;
+  let t = s.editedAt || s.start || 0;
+  if (s.segs && s.segs.length) {
+    for (const seg of s.segs) {
+      if (seg && seg[1] && seg[1] > t) t = seg[1];
+    }
+  }
+  return t;
+}
+
+function pickNewerSession(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const aLatest = sessionLatestTime(a);
+  const bLatest = sessionLatestTime(b);
+
+  const aRunning = a.run != null;
+  const bRunning = b.run != null;
+
+  if (aRunning && !bRunning) {
+    return bLatest >= a.run ? b : a;
+  }
+  if (!aRunning && bRunning) {
+    return aLatest >= b.run ? a : b;
+  }
+  if (aRunning && bRunning) {
+    return (a.run || 0) >= (b.run || 0) ? a : b;
+  }
+  const aEd = a.editedAt || aLatest;
+  const bEd = b.editedAt || bLatest;
+  return aEd >= bEd ? a : b;
 }
 
 function mergeUserData(local, cloud) {
@@ -2769,9 +2825,7 @@ function mergeUserData(local, cloud) {
       sessionMap.set(s.id, s);
     } else {
       const existing = sessionMap.get(s.id);
-      const localTime = s.editedAt || s.start || 0;
-      const existingTime = existing.editedAt || existing.start || 0;
-      if (localTime >= existingTime) sessionMap.set(s.id, s);
+      sessionMap.set(s.id, pickNewerSession(s, existing));
     }
   }
   const mergedSessions = Array.from(sessionMap.values()).sort((a, b) => (a.start || 0) - (b.start || 0));
@@ -2785,13 +2839,42 @@ function mergeUserData(local, cloud) {
   }
   const mergedCats = Array.from(catMap.values());
 
-  const mergedSettings = { ...local.settings, ...(cloud.settings || {}) };
+  const cloudSettings = { ...(cloud.settings || {}) };
+  const cloudRunners = cloud.runners || cloudSettings._runners || null;
+  delete cloudSettings._runners;
+  const mergedSettings = { ...local.settings, ...cloudSettings };
+  delete mergedSettings._runners;
+
+  const mergedRunners = {};
+  const MODES = ['stopwatch', 'timer', 'pomodoro'];
+  for (const m of MODES) {
+    const lr = local.runners?.[m];
+    const cr = cloudRunners?.[m];
+    if (lr && !cr) {
+      mergedRunners[m] = lr;
+    } else if (!lr && cr) {
+      mergedRunners[m] = cr;
+    } else if (lr && cr) {
+      const lTouch = lr.touched || 0;
+      const cTouch = cr.touched || 0;
+      if (cTouch > lTouch) {
+        mergedRunners[m] = cr;
+      } else if (lTouch > cTouch) {
+        mergedRunners[m] = lr;
+      } else {
+        mergedRunners[m] = (cr.runStart != null && lr.runStart == null) ? cr : lr;
+      }
+    } else {
+      mergedRunners[m] = local.runners?.[m] || null;
+    }
+  }
 
   return {
     ...local,
     sessions: mergedSessions,
     cats: mergedCats.length ? mergedCats : local.cats,
     settings: mergedSettings,
+    runners: mergedRunners,
   };
 }
 
@@ -2928,7 +3011,12 @@ async function sync(options = {}) {
     isRemoteUpdate = true;
     let merged;
     try {
-      merged = mergeUserData(data, cloudRow);
+      merged = mergeUserData(data, {
+        settings: cloudRow?.settings || {},
+        cats: cloudRow?.cats || [],
+        sessions: cloudRow?.sessions || [],
+        runners: cloudRow?.settings?._runners || cloudRow?.runners || null,
+      });
       replaceAll(merged);
     } finally {
       isRemoteUpdate = false;
@@ -2944,7 +3032,7 @@ async function sync(options = {}) {
       },
       body: JSON.stringify({
         user_id: sess.user.id,
-        settings: merged.settings,
+        settings: { ...merged.settings, _runners: merged.runners },
         cats: merged.cats,
         sessions: merged.sessions,
         updated_at: new Date().toISOString(),
@@ -3005,7 +3093,12 @@ function initAutoSync() {
   on('change', () => {
     if (!isRemoteUpdate && currentUser()) {
       broadcastLiveRunner();
-      broadcastDataSync({ settings: data.settings, cats: data.cats, sessions: data.sessions });
+      broadcastDataSync({
+        settings: data.settings,
+        cats: data.cats,
+        sessions: data.sessions,
+        runners: data.runners,
+      });
       scheduleAutoSync();
     }
   });
@@ -4060,8 +4153,7 @@ const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById,
 const engine = __m.engine;
 const { makeFace, homeFaceType } = __m.faces;
 const { icon } = __m.ui;
-const { openSessionEditor, openGoalSheet, openAccountSheet } = __m.sheets;
-const { currentUser, getSyncStatus } = __m.supabase;
+const { openSessionEditor, openGoalSheet } = __m.sheets;
 const { esc, fmtDur, fmtTime, fmtDate, pad, clamp, hms, MIN } = __m.util;
 
 const PHONE_24 = new Date(2000, 0, 1, 13).toLocaleTimeString([], { hour: 'numeric' }).includes('13');
@@ -4099,9 +4191,6 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
       <header class="hero-head">
         <div class="hero-when"><span class="greet"></span><span class="home-date"></span></div>
         <div class="topbar-right">
-          <button class="pill user-pill home-user-pill" style="display:none" aria-label="Account">
-            <span class="sync-dot synced"></span><span class="user-name"></span>
-          </button>
           <button class="icon-btn" data-looks aria-label="Looks" title="Looks">${icon('palette')}</button>
           <button class="icon-btn" data-settings aria-label="Settings" title="Settings">${icon('settings')}</button>
         </div>
@@ -4120,26 +4209,6 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
   const cue = root.querySelector('.cue-text');
   const bento = root.querySelector('.home-bento');
   const slot = root.querySelector('.live-slot');
-  const homeUserPill = root.querySelector('.home-user-pill');
-  function syncHomeUser() {
-    if (!homeUserPill) return;
-    const user = currentUser();
-    const status = getSyncStatus();
-    homeUserPill.style.display = 'inline-flex';
-    const dot = homeUserPill.querySelector('.sync-dot');
-    if (user) {
-      if (dot) dot.className = `sync-dot ${status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline'}`;
-      const nameEl = homeUserPill.querySelector('.user-name');
-      if (nameEl) nameEl.textContent = user.username;
-    } else {
-      if (dot) dot.className = 'sync-dot offline';
-      const nameEl = homeUserPill.querySelector('.user-name');
-      if (nameEl) nameEl.textContent = 'Sign In';
-    }
-  }
-  homeUserPill?.addEventListener('click', () => openAccountSheet());
-  on('sync-status', syncHomeUser);
-  syncHomeUser();
   let face = makeFace(clockEl, homeFaceType(), HOME_CTX);
   let minuteKey = '';
   let chartW = 0;
@@ -5478,14 +5547,14 @@ const bg = __m.background;
 const { fontMetrics, clearMetrics } = __m.flip;
 const { makeFace } = __m.faces;
 const { icon, toast, dialog, overlayOpen, haptic, canVibrate } = __m.ui;
-const { openEditor, openCategories, openAccountSheet } = __m.sheets;
+const { openEditor, openCategories } = __m.sheets;
 const { mountStats } = __m.stats;
 const { mountHome } = __m.home;
 const { openSettings } = __m.settings;
 const { openLooks } = __m.looks;
 const { openCustomize } = __m.customize;
 const { initPWA, notify } = __m.pwa;
-const { initAutoSync, currentUser, getSyncStatus } = __m.supabase;
+const { initAutoSync } = __m.supabase;
 
 const TABS = ['home', 'stopwatch', 'timer', 'pomodoro', 'stats'];
 const S = () => data.settings;
@@ -5603,28 +5672,7 @@ function applyAll() {
   frame(true);
   updateWakeLock();
   poke();
-  updateUserPill();
 }
-
-const userBtn = $('#btn-user');
-function updateUserPill() {
-  if (!userBtn) return;
-  const user = currentUser();
-  const status = getSyncStatus();
-  userBtn.style.display = 'inline-flex';
-  const dot = userBtn.querySelector('.sync-dot');
-  if (user) {
-    if (dot) dot.className = `sync-dot ${status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline'}`;
-    const nameEl = userBtn.querySelector('.user-name');
-    if (nameEl) nameEl.textContent = user.username;
-  } else {
-    if (dot) dot.className = 'sync-dot offline';
-    const nameEl = userBtn.querySelector('.user-name');
-    if (nameEl) nameEl.textContent = 'Sign In';
-  }
-}
-userBtn?.addEventListener('click', () => openAccountSheet());
-on('sync-status', updateUserPill);
 
 /* ---------- tabs ---------- */
 
@@ -6058,6 +6106,8 @@ on('change', () => {
   if (tab === 'home') home.refresh();
 });
 on('runner', () => {
+  const a = engine.active();
+  if (a && isModeTab() && tab !== a) showTab(a);
   updateWakeLock();
   poke();
   bg.sync();
