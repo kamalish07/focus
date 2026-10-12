@@ -67,8 +67,8 @@ export function openSettings() {
     const status = getSyncStatus();
     const user = status.user;
     if (user) {
-      const dot = status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
-      const label = status.state === 'syncing' ? 'Syncing...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
+      const dot = status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
+      const label = status.realtime ? 'Live Sync Active (Instant)' : status.state === 'syncing' ? 'Syncing...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
       return `
         <div class="account-card">
           <div class="account-info">

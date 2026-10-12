@@ -1,17 +1,26 @@
 // Supabase Authentication & Real-time Cloud Sync for Focus.
 // Allows users to create an account with username & password,
-// and sync focus sessions, categories, and settings across laptop & mobile.
-import { data, replaceAll, saveSoon, on, emit } from './store.js';
+// and sync focus sessions, categories, and settings instantly across laptop & mobile.
+import { data, replaceAll, resetAll, save, saveSoon, on, emit } from './store.js';
 import { SUPABASE_URL as DEF_URL, SUPABASE_ANON_KEY as DEF_KEY } from './config.js';
 
 const KEY_URL = 'focus.supabase.url';
 const KEY_KEY = 'focus.supabase.key';
 const KEY_SESSION = 'focus.supabase.session';
 
+const CLIENT_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
+
 let syncState = 'idle'; // idle | syncing | synced | error | offline
 let lastSyncTime = 0;
 let lastError = '';
 let syncTimer = 0;
+
+let ws = null;
+let heartbeatTimer = 0;
+let reconnectTimer = 0;
+let refId = 1;
+let isRemoteUpdate = false;
+let realtimeConnected = false;
 
 export function getSupabaseConfig() {
   const url = (localStorage.getItem(KEY_URL) || DEF_URL || '').trim().replace(/\/+$/, '');
@@ -59,7 +68,6 @@ export function currentUser() {
 async function refreshSessionIfNeeded(sess) {
   if (!sess || !sess.refresh_token) return null;
   const now = Date.now();
-  // Refresh if expiring within 2 minutes
   if (sess.expires_at && sess.expires_at > now + 120000) return sess;
   const { url, key } = getSupabaseConfig();
   if (!url || !key) return sess;
@@ -89,10 +97,259 @@ async function refreshSessionIfNeeded(sess) {
 function normalizeIdentity(identity) {
   const trimmed = identity.trim();
   if (trimmed.includes('@')) {
-    return { email: trimmed, username: trimmed.split('@')[0] };
+    return { email: trimmed.toLowerCase(), username: trimmed.split('@')[0] };
   }
   return { email: `${trimmed.toLowerCase()}@focus.app`, username: trimmed };
 }
+
+/* ---------- Supabase Realtime WebSocket (Instant Live Sync) ---------- */
+
+export function connectRealtime() {
+  const user = currentUser();
+  const { url, key } = getSupabaseConfig();
+  if (!user || !url || !key) return;
+
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  clearTimeout(reconnectTimer);
+  clearInterval(heartbeatTimer);
+
+  const ref = url.replace(/^https?:\/\//, '').split('.')[0];
+  const wsUrl = `wss://${ref}.supabase.co/realtime/v1/websocket?apikey=${key}&vsn=1.0.0`;
+
+  try {
+    ws = new WebSocket(wsUrl);
+  } catch (e) {
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    realtimeConnected = true;
+    refId = 1;
+    heartbeatTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(refId++) }));
+      }
+    }, 25000);
+
+    const topic = `realtime:focus_${user.id}`;
+    ws.send(JSON.stringify({
+      topic,
+      event: 'phx_join',
+      payload: { config: { broadcast: { self: false } } },
+      ref: String(refId++),
+    }));
+    emit('sync-status');
+  };
+
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.event === 'broadcast' && msg.payload?.payload) {
+        handleRealtimeBroadcast(msg.payload.payload);
+      }
+    } catch {}
+  };
+
+  ws.onclose = () => {
+    realtimeConnected = false;
+    clearInterval(heartbeatTimer);
+    scheduleReconnect();
+    emit('sync-status');
+  };
+
+  ws.onerror = () => {
+    realtimeConnected = false;
+  };
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  if (currentUser()) {
+    reconnectTimer = setTimeout(connectRealtime, 2500);
+  }
+}
+
+export function disconnectRealtime() {
+  clearTimeout(reconnectTimer);
+  clearInterval(heartbeatTimer);
+  if (ws) {
+    try { ws.close(); } catch {}
+    ws = null;
+  }
+  realtimeConnected = false;
+}
+
+function handleRealtimeBroadcast(payload) {
+  if (!payload || payload.clientId === CLIENT_ID) return;
+
+  if (payload.type === 'live_runner') {
+    isRemoteUpdate = true;
+    try {
+      if (payload.runners) {
+        Object.assign(data.runners, payload.runners);
+      }
+      if (payload.cat && payload.cat !== data.settings.cat) {
+        data.settings.cat = payload.cat;
+      }
+      if (payload.sessions && Array.isArray(payload.sessions)) {
+        for (const s of payload.sessions) {
+          if (!s || !s.id) continue;
+          const idx = data.sessions.findIndex((x) => x.id === s.id);
+          if (idx >= 0) data.sessions[idx] = s;
+          else data.sessions.push(s);
+        }
+      }
+      save();
+      emit('runner');
+      emit('change');
+    } finally {
+      isRemoteUpdate = false;
+    }
+  } else if (payload.type === 'data_sync') {
+    isRemoteUpdate = true;
+    try {
+      if (payload.data) {
+        replaceAll(payload.data);
+        emit('change');
+        emit('runner');
+        emit('settings');
+      }
+    } finally {
+      isRemoteUpdate = false;
+    }
+  }
+}
+
+export function broadcastLiveRunner() {
+  if (isRemoteUpdate) return;
+  const user = currentUser();
+  if (!user || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const topic = `realtime:focus_${user.id}`;
+  const runningSession = data.sessions.find((s) => s.run != null);
+  const activeSessions = runningSession ? [runningSession] : data.sessions.slice(-3);
+
+  ws.send(JSON.stringify({
+    topic,
+    event: 'broadcast',
+    payload: {
+      type: 'broadcast',
+      event: 'runner_event',
+      payload: {
+        clientId: CLIENT_ID,
+        type: 'live_runner',
+        runners: data.runners,
+        cat: data.settings.cat,
+        sessions: activeSessions,
+        sentAt: Date.now(),
+      },
+    },
+    ref: String(refId++),
+  }));
+}
+
+export function broadcastDataSync(fullData) {
+  if (isRemoteUpdate) return;
+  const user = currentUser();
+  if (!user || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  const topic = `realtime:focus_${user.id}`;
+  ws.send(JSON.stringify({
+    topic,
+    event: 'broadcast',
+    payload: {
+      type: 'broadcast',
+      event: 'data_event',
+      payload: {
+        clientId: CLIENT_ID,
+        type: 'data_sync',
+        data: fullData,
+        sentAt: Date.now(),
+      },
+    },
+    ref: String(refId++),
+  }));
+}
+
+/* ---------- Cloud Data Pull & Merge ---------- */
+
+export async function pullCloudData(sess) {
+  const { url, key } = getSupabaseConfig();
+  if (!url || !key || !sess) return null;
+
+  try {
+    const res = await fetch(`${url}/rest/v1/user_data?select=*`, {
+      headers: { apikey: key, Authorization: `Bearer ${sess.access_token}` },
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (rows && rows.length > 0 && rows[0]) {
+      const row = rows[0];
+      isRemoteUpdate = true;
+      try {
+        replaceAll({
+          settings: row.settings || data.settings,
+          cats: row.cats || data.cats,
+          sessions: row.sessions || [],
+        });
+        emit('change');
+        emit('runner');
+        emit('settings');
+      } finally {
+        isRemoteUpdate = false;
+      }
+      return row;
+    }
+  } catch (e) {
+    console.warn('Pull cloud data failed:', e);
+  }
+  return null;
+}
+
+export function mergeUserData(local, cloud) {
+  if (!cloud) return local;
+
+  const sessionMap = new Map();
+  for (const s of cloud.sessions || []) {
+    if (s && s.id) sessionMap.set(s.id, s);
+  }
+  for (const s of local.sessions || []) {
+    if (!s || !s.id) continue;
+    if (!sessionMap.has(s.id)) {
+      sessionMap.set(s.id, s);
+    } else {
+      const existing = sessionMap.get(s.id);
+      const localTime = s.editedAt || s.start || 0;
+      const existingTime = existing.editedAt || existing.start || 0;
+      if (localTime >= existingTime) sessionMap.set(s.id, s);
+    }
+  }
+  const mergedSessions = Array.from(sessionMap.values()).sort((a, b) => (a.start || 0) - (b.start || 0));
+
+  const catMap = new Map();
+  for (const c of cloud.cats || []) {
+    if (c && c.id) catMap.set(c.id, c);
+  }
+  for (const c of local.cats || []) {
+    if (c && c.id && !catMap.has(c.id)) catMap.set(c.id, c);
+  }
+  const mergedCats = Array.from(catMap.values());
+
+  const mergedSettings = { ...local.settings, ...(cloud.settings || {}) };
+
+  return {
+    ...local,
+    sessions: mergedSessions,
+    cats: mergedCats.length ? mergedCats : local.cats,
+    settings: mergedSettings,
+  };
+}
+
+/* ---------- Authentication ---------- */
 
 export async function signUp(identity, password) {
   const { url, key } = getSupabaseConfig();
@@ -102,15 +359,17 @@ export async function signUp(identity, password) {
   const res = await fetch(`${url}/auth/v1/signup`, {
     method: 'POST',
     headers: { apikey: key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email,
-      password,
-      data: { username },
-    }),
+    body: JSON.stringify({ email, password, data: { username } }),
   });
 
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error_description || body.msg || body.message || 'Failed to create account');
+  if (!res.ok) {
+    const msg = body.error_description || body.msg || body.message || '';
+    if (msg.toLowerCase().includes('already registered')) {
+      throw new Error('This username is already taken. Please switch to Sign In.');
+    }
+    throw new Error(msg || 'Failed to create account');
+  }
 
   if (body.access_token) {
     const sess = {
@@ -118,6 +377,7 @@ export async function signUp(identity, password) {
       expires_at: Date.now() + (body.expires_in || 3600) * 1000,
     };
     saveSession(sess);
+    connectRealtime();
     sync({ silent: true });
     return { user: body.user, session: sess, autoLoggedIn: true };
   }
@@ -136,18 +396,33 @@ export async function signIn(identity, password) {
   });
 
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error_description || body.msg || body.message || 'Invalid username or password');
+  if (!res.ok) {
+    const msg = body.error_description || body.msg || body.message || '';
+    if (msg.toLowerCase().includes('invalid') || msg.toLowerCase().includes('credentials')) {
+      throw new Error('Incorrect username or password. Check spelling or create a new ID.');
+    }
+    throw new Error(msg || 'Invalid username or password');
+  }
 
   const sess = {
     ...body,
     expires_at: Date.now() + (body.expires_in || 3600) * 1000,
   };
   saveSession(sess);
-  sync({ silent: true });
+
+  // Load account data fresh from cloud so we never stick with previous user's data
+  const cloudRow = await pullCloudData(sess);
+  if (!cloudRow) {
+    await sync({ silent: true });
+  }
+
+  connectRealtime();
+  emit('sync-status');
   return { user: body.user, session: sess };
 }
 
 export async function signOut() {
+  disconnectRealtime();
   const sess = getStoredSession();
   const { url, key } = getSupabaseConfig();
   if (sess && url && key) {
@@ -157,52 +432,16 @@ export async function signOut() {
     }).catch(() => {});
   }
   saveSession(null);
+  resetAll();
   syncState = 'idle';
   lastError = '';
   emit('sync-status');
+  emit('change');
+  emit('runner');
+  emit('settings');
 }
 
-export function mergeUserData(local, cloud) {
-  if (!cloud) return local;
-
-  // 1. Sessions: Union by id, keeping latest edited or recorded
-  const sessionMap = new Map();
-  for (const s of cloud.sessions || []) {
-    if (s && s.id) sessionMap.set(s.id, s);
-  }
-  for (const s of local.sessions || []) {
-    if (!s || !s.id) continue;
-    if (!sessionMap.has(s.id)) {
-      sessionMap.set(s.id, s);
-    } else {
-      const existing = sessionMap.get(s.id);
-      const localTime = s.editedAt || s.start || 0;
-      const existingTime = existing.editedAt || existing.start || 0;
-      if (localTime >= existingTime) sessionMap.set(s.id, s);
-    }
-  }
-  const mergedSessions = Array.from(sessionMap.values()).sort((a, b) => (a.start || 0) - (b.start || 0));
-
-  // 2. Categories: Union by id
-  const catMap = new Map();
-  for (const c of cloud.cats || []) {
-    if (c && c.id) catMap.set(c.id, c);
-  }
-  for (const c of local.cats || []) {
-    if (c && c.id && !catMap.has(c.id)) catMap.set(c.id, c);
-  }
-  const mergedCats = Array.from(catMap.values());
-
-  // 3. Settings: overlay cloud settings on top of local
-  const mergedSettings = { ...local.settings, ...(cloud.settings || {}) };
-
-  return {
-    ...local,
-    sessions: mergedSessions,
-    cats: mergedCats.length ? mergedCats : local.cats,
-    settings: mergedSettings,
-  };
-}
+/* ---------- Cloud Database Sync ---------- */
 
 export async function sync(options = {}) {
   let sess = getStoredSession();
@@ -227,13 +466,9 @@ export async function sync(options = {}) {
   emit('sync-status');
 
   try {
-    // 1. Fetch remote data from user_data table
     const getRes = await fetch(`${url}/rest/v1/user_data?select=*`, {
       method: 'GET',
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${sess.access_token}`,
-      },
+      headers: { apikey: key, Authorization: `Bearer ${sess.access_token}` },
     });
 
     if (!getRes.ok) {
@@ -244,11 +479,15 @@ export async function sync(options = {}) {
     const rows = await getRes.json();
     const cloudRow = rows && rows[0];
 
-    // 2. Merge local and cloud data
-    const merged = mergeUserData(data, cloudRow);
-    replaceAll(merged);
+    isRemoteUpdate = true;
+    let merged;
+    try {
+      merged = mergeUserData(data, cloudRow);
+      replaceAll(merged);
+    } finally {
+      isRemoteUpdate = false;
+    }
 
-    // 3. Push merged data back to cloud
     const postRes = await fetch(`${url}/rest/v1/user_data`, {
       method: 'POST',
       headers: {
@@ -296,24 +535,49 @@ export function getSyncStatus() {
     error: lastError,
     user: currentUser(),
     configured: isConfigured(),
+    realtime: realtimeConnected,
   };
 }
 
 export function scheduleAutoSync() {
-  if (!currentUser()) return;
+  if (!currentUser() || isRemoteUpdate) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     sync({ silent: true });
-  }, 4000);
+  }, 2000);
 }
 
 export function initAutoSync() {
-  on('change', () => scheduleAutoSync());
-  window.addEventListener('online', () => sync({ silent: true }));
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && currentUser()) sync({ silent: true });
+  // Live broadcast on runner updates
+  on('runner', () => {
+    if (!isRemoteUpdate && currentUser()) {
+      broadcastLiveRunner();
+    }
   });
+
+  // Broadcast data changes & sync
+  on('change', () => {
+    if (!isRemoteUpdate && currentUser()) {
+      broadcastLiveRunner();
+      broadcastDataSync({ settings: data.settings, cats: data.cats, sessions: data.sessions });
+      scheduleAutoSync();
+    }
+  });
+
+  window.addEventListener('online', () => {
+    connectRealtime();
+    sync({ silent: true });
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && currentUser()) {
+      connectRealtime();
+      sync({ silent: true });
+    }
+  });
+
   if (currentUser()) {
-    setTimeout(() => sync({ silent: true }), 1000);
+    connectRealtime();
+    setTimeout(() => sync({ silent: true }), 400);
   }
 }

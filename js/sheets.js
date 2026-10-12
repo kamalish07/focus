@@ -478,15 +478,15 @@ export function openSessionEditor(s, dayK, onDone) {
 /* ---------- account & cloud sync ---------- */
 
 export function openAccountSheet(onDone) {
-  let activeTab = 'signup';
+  let activeTab = 'signin';
 
   function renderBody() {
     const status = getSyncStatus();
     const user = status.user;
 
     if (user) {
-      const syncDotClass = status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
-      const syncLabel = status.state === 'syncing' ? 'Syncing now...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
+      const syncDotClass = status.realtime ? 'synced' : status.state === 'syncing' ? 'syncing' : status.state === 'synced' ? 'synced' : status.state === 'error' ? 'error' : 'offline';
+      const syncLabel = status.realtime ? 'Live Sync Active (Instant)' : status.state === 'syncing' ? 'Syncing now...' : status.state === 'synced' ? `Synced ${status.lastSync ? fmtTime(status.lastSync) : 'just now'}` : status.state === 'offline' ? 'Offline' : status.error || 'Sync error';
 
       return `
         <div class="account-card" style="margin-bottom:16px">
@@ -498,7 +498,7 @@ export function openAccountSheet(onDone) {
             </div>
           </div>
         </div>
-        <p class="hint">Your focus time, sessions, and settings sync automatically between your laptop and phone.</p>
+        <p class="hint">Live real-time sync is active. Whenever you start or pause a clock on your phone, your PC updates live instantly.</p>
         <div class="sheet-actions" style="margin-top:16px">
           <button class="btn primary" data-sync-now>${icon('sync')}<span>Sync now</span></button>
           <button class="btn danger" data-sign-out>Sign out</button>
@@ -508,21 +508,21 @@ export function openAccountSheet(onDone) {
 
     return `
       <div class="auth-tabs">
-        <div class="auth-tab ${activeTab === 'signup' ? 'active' : ''}" data-tab="signup">Create ID</div>
         <div class="auth-tab ${activeTab === 'signin' ? 'active' : ''}" data-tab="signin">Sign In</div>
+        <div class="auth-tab ${activeTab === 'signup' ? 'active' : ''}" data-tab="signup">Create ID</div>
       </div>
       <div class="auth-err" hidden></div>
       <label class="field">
         <span class="field-label">${activeTab === 'signup' ? 'Choose a Username' : 'Username'}</span>
-        <input class="input" data-auth-id autocomplete="username" placeholder="e.g. kamal">
+        <input class="input" data-auth-id autocomplete="username" placeholder="e.g. kamalish">
       </label>
       <label class="field">
         <span class="field-label">Password</span>
         <input class="input" type="password" data-auth-pass autocomplete="${activeTab === 'signup' ? 'new-password' : 'current-password'}" placeholder="At least 6 characters">
       </label>
-      <button class="btn primary block" data-auth-submit>${activeTab === 'signup' ? 'Create ID & Sync' : 'Sign In'}</button>
+      <button class="btn primary block" data-auth-submit>${activeTab === 'signin' ? 'Sign In & Sync' : 'Create ID & Sync'}</button>
       <p class="hint small center" style="margin-top:14px">
-        ${activeTab === 'signup' ? 'Create an ID to automatically sync and access your focus time on laptop and mobile.' : 'Sign in with the same username on your laptop and phone to sync your data.'}
+        ${activeTab === 'signin' ? 'Sign in with your username and password to load your focus history and enable live sync.' : 'Create an ID to automatically sync and access your focus time on laptop and mobile.'}
       </p>
     `;
   }
@@ -545,35 +545,6 @@ export function openAccountSheet(onDone) {
       return;
     }
 
-    if (e.target.closest('[data-toggle-cfg]')) {
-      showConfig = !showConfig;
-      update();
-      return;
-    }
-
-    if (e.target.closest('[data-toggle-sql]')) {
-      showSql = !showSql;
-      update();
-      return;
-    }
-
-    if (e.target.closest('[data-copy-sql]')) {
-      navigator.clipboard?.writeText(SQL_SNIPPET);
-      toast('SQL script copied to clipboard!');
-      return;
-    }
-
-    if (e.target.closest('[data-save-cfg]')) {
-      const u = sh.body.querySelector('[data-cfg-url]')?.value || '';
-      const k = sh.body.querySelector('[data-cfg-key]')?.value || '';
-      if (!u.trim() || !k.trim()) return toast('Please enter both Project URL and Anon key');
-      setSupabaseConfig(u, k);
-      showConfig = false;
-      toast('Supabase configured!');
-      update();
-      return;
-    }
-
     if (e.target.closest('[data-sync-now]')) {
       const btn = e.target.closest('[data-sync-now]');
       btn.disabled = true;
@@ -588,8 +559,9 @@ export function openAccountSheet(onDone) {
     }
 
     if (e.target.closest('[data-sign-out]')) {
-      if (await confirmDialog({ title: 'Sign out?', message: 'Your data on this device will stay intact.', ok: 'Sign out' })) {
+      if (await confirmDialog({ title: 'Sign out?', message: 'Your data is safely backed up in the cloud.', ok: 'Sign out' })) {
         await signOut();
+        activeTab = 'signin';
         toast('Signed out');
         update();
         onDone?.();
