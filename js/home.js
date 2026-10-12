@@ -201,7 +201,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
       const x = cx - bw / 2;
       if (d.v > 0) {
         const top = Math.min(y(d.v), y(0) - 3);
-        const r = Math.min(4, bw / 2, y(0) - top);
+        const r = Math.max(0, Math.min(4, bw / 2, y(0) - top));
         g += `<path class="wbar${d.today ? ' today' : ''}" d="M${x},${y(0)}V${top + r}A${r},${r} 0 0 1 ${x + r},${top}H${x + bw - r}A${r},${r} 0 0 1 ${x + bw},${top + r}V${y(0)}Z"><title>${esc(d.long)}: ${fmtDur(d.v)}</title></path>`;
         if (d.today) g += `<text class="wval" x="${cx}" y="${top - 6}" text-anchor="middle">${fmtDur(d.v)}</text>`;
       }
@@ -301,7 +301,8 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     if (heat) {
       const { svg, note } = heatSvg(Math.max(200, heat.clientWidth), now);
       heat.innerHTML = svg;
-      heat.closest('.dash-card').querySelector('[data-note]').textContent = note;
+      const noteEl = heat.closest('.dash-card')?.querySelector('[data-note]');
+      if (noteEl) noteEl.textContent = note;
     }
   }
 

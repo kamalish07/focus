@@ -21,6 +21,8 @@ let reconnectTimer = 0;
 let refId = 1;
 let isRemoteUpdate = false;
 let realtimeConnected = false;
+let localDirty = false;
+let lastCloudUpdatedAt = null;
 
 export function getSupabaseConfig() {
   const url = (localStorage.getItem(KEY_URL) || DEF_URL || '').trim().replace(/\/+$/, '');
@@ -310,6 +312,8 @@ export async function pullCloudData(sess) {
     const rows = await res.json();
     if (rows && rows.length > 0 && rows[0]) {
       const row = rows[0];
+      lastCloudUpdatedAt = row.updated_at || null;
+      localDirty = false;
       isRemoteUpdate = true;
       try {
         const merged = mergeUserData(data, {
@@ -335,8 +339,8 @@ export async function pullCloudData(sess) {
 
 function sessionLatestTime(s) {
   if (!s) return 0;
-  let t = s.editedAt || s.start || 0;
-  if (s.segs && s.segs.length) {
+  let t = Math.max(s.editedAt || 0, s.start || 0);
+  if (Array.isArray(s.segs) && s.segs.length) {
     for (const seg of s.segs) {
       if (seg && seg[1] && seg[1] > t) t = seg[1];
     }
@@ -354,10 +358,10 @@ function pickNewerSession(a, b) {
   const bRunning = b.run != null;
 
   if (aRunning && !bRunning) {
-    return bLatest >= a.run ? b : a;
+    return (b.editedAt || 0) > a.run ? b : a;
   }
   if (!aRunning && bRunning) {
-    return aLatest >= b.run ? a : b;
+    return (a.editedAt || 0) > b.run ? a : b;
   }
   if (aRunning && bRunning) {
     return (a.run || 0) >= (b.run || 0) ? a : b;
@@ -534,6 +538,8 @@ export async function signOut() {
     }).catch(() => {});
   }
   saveSession(null);
+  lastCloudUpdatedAt = null;
+  localDirty = false;
   resetAll();
   syncState = 'idle';
   lastError = '';
@@ -564,8 +570,10 @@ export async function sync(options = {}) {
   const { url, key } = getSupabaseConfig();
   if (!url || !key) return { ok: false, reason: 'not_configured' };
 
-  syncState = 'syncing';
-  emit('sync-status');
+  if (!options.silent) {
+    syncState = 'syncing';
+    emit('sync-status');
+  }
 
   try {
     const getRes = await fetch(`${url}/rest/v1/user_data?select=*`, {
@@ -581,40 +589,55 @@ export async function sync(options = {}) {
     const rows = await getRes.json();
     const cloudRow = rows && rows[0];
 
-    isRemoteUpdate = true;
-    let merged;
-    try {
-      merged = mergeUserData(data, {
-        settings: cloudRow?.settings || {},
-        cats: cloudRow?.cats || [],
-        sessions: cloudRow?.sessions || [],
-        runners: cloudRow?.settings?._runners || cloudRow?.runners || null,
-      });
-      replaceAll(merged);
-    } finally {
-      isRemoteUpdate = false;
+    const cloudHasNewerData = !!(
+      cloudRow &&
+      (options.forcePull || !lastCloudUpdatedAt || (cloudRow.updated_at && cloudRow.updated_at !== lastCloudUpdatedAt))
+    );
+
+    if (cloudHasNewerData && cloudRow) {
+      isRemoteUpdate = true;
+      try {
+        const merged = mergeUserData(data, {
+          settings: cloudRow.settings || {},
+          cats: cloudRow.cats || [],
+          sessions: cloudRow.sessions || [],
+          runners: cloudRow.settings?._runners || cloudRow.runners || null,
+        });
+        replaceAll(merged);
+      } finally {
+        isRemoteUpdate = false;
+      }
+      lastCloudUpdatedAt = cloudRow.updated_at;
     }
 
-    const postRes = await fetch(`${url}/rest/v1/user_data`, {
-      method: 'POST',
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${sess.access_token}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify({
-        user_id: sess.user.id,
-        settings: { ...merged.settings, _runners: merged.runners },
-        cats: merged.cats,
-        sessions: merged.sessions,
-        updated_at: new Date().toISOString(),
-      }),
-    });
+    const shouldPush = localDirty || !cloudRow || options.forcePush;
 
-    if (!postRes.ok) {
-      const err = await postRes.json().catch(() => ({}));
-      throw new Error(err.message || 'Failed to save to cloud');
+    if (shouldPush) {
+      const newUpdatedAt = new Date().toISOString();
+      const postRes = await fetch(`${url}/rest/v1/user_data`, {
+        method: 'POST',
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${sess.access_token}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          user_id: sess.user.id,
+          settings: { ...data.settings, _runners: data.runners },
+          cats: data.cats,
+          sessions: data.sessions,
+          updated_at: newUpdatedAt,
+        }),
+      });
+
+      if (!postRes.ok) {
+        const err = await postRes.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to save to cloud');
+      }
+
+      lastCloudUpdatedAt = newUpdatedAt;
+      localDirty = false;
     }
 
     syncState = 'synced';
@@ -648,23 +671,27 @@ export function getSyncStatus() {
 
 export function scheduleAutoSync() {
   if (!currentUser() || isRemoteUpdate) return;
+  localDirty = true;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     sync({ silent: true });
-  }, 400);
+  }, 800);
 }
 
 export function initAutoSync() {
   // Live broadcast on runner updates
   on('runner', () => {
     if (!isRemoteUpdate && currentUser()) {
+      localDirty = true;
       broadcastLiveRunner();
+      scheduleAutoSync();
     }
   });
 
   // Broadcast data changes & sync
   on('change', () => {
     if (!isRemoteUpdate && currentUser()) {
+      localDirty = true;
       broadcastLiveRunner();
       broadcastDataSync({
         settings: data.settings,
@@ -676,12 +703,12 @@ export function initAutoSync() {
     }
   });
 
-  // Fast background polling fallback so devices are always in sync even if WebSockets sleep
+  // Fallback background polling so devices stay in sync even if WebSockets sleep or wake up
   setInterval(() => {
     if (!document.hidden && currentUser() && !isRemoteUpdate) {
       sync({ silent: true });
     }
-  }, 2500);
+  }, 20000);
 
   window.addEventListener('online', () => {
     connectRealtime();

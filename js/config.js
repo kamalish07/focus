@@ -1,4 +1,4 @@
-export const APP_VERSION = '1.11.5';
+export const APP_VERSION = '1.11.6';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
 export const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';

@@ -250,7 +250,7 @@ export function mountStats(root, { visible = () => true } = {}) {
       let yTop = y(0);
       if (b.total > 0) {
         yTop = Math.min(y(b.total), y(0) - 2);
-        const r = Math.min(4, bw / 2, y(0) - yTop);
+        const r = Math.max(0, Math.min(4, bw / 2, y(0) - yTop));
         defs += `<clipPath id="bc${i}"><path d="M${x},${y(0)}V${yTop + r}A${r},${r} 0 0 1 ${x + r},${yTop}H${x + bw - r}A${r},${r} 0 0 1 ${x + bw},${yTop + r}V${y(0)}Z"/></clipPath>`;
         const present = order.filter((id) => b.cats[id] > 0);
         let acc = 0;

@@ -106,8 +106,13 @@ function normalize(d) {
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
   if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
   const validCatIds = new Set(cats.map((c) => c.id));
-  const rawSessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
+  const rawSessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id) : [];
   for (const s of rawSessions) {
+    if (!Array.isArray(s.segs)) {
+      const start = s.start || Date.now();
+      const dur = s.dur || 0;
+      s.segs = dur > 0 ? [[start, start + dur]] : [];
+    }
     if (!s.cat || s.cat === 'undefined' || !validCatIds.has(s.cat)) {
       s.cat = settings.cat && settings.cat !== NONE && validCatIds.has(settings.cat) ? settings.cat : cats[0]?.id || NONE;
     }
@@ -370,8 +375,11 @@ export function removeSession(id) {
 }
 
 export function rawDur(s, now = Date.now()) {
+  if (!s) return 0;
   let t = 0;
-  for (const [a, b] of s.segs) t += b - a;
+  if (Array.isArray(s.segs)) {
+    for (const [a, b] of s.segs) t += (b || 0) - (a || 0);
+  }
   if (s.run != null) t += Math.max(0, now - s.run);
   return t;
 }

@@ -67,7 +67,7 @@ export function displayMs(m = viewMode, now = Date.now()) {
 /* ---------- internals ---------- */
 
 function openSession(m, at) {
-  const s = { id: uid(), cat: S().cat, mode: m, start: at, segs: [], adj: 0, run: null };
+  const s = { id: uid(), cat: S().cat, mode: m, start: at, segs: [], adj: 0, run: null, editedAt: at };
   data.sessions.push(s);
   R(m).sid = s.id;
   return s;
@@ -87,6 +87,7 @@ function stopAt(m, at) {
   if (s && s.run != null) {
     s.segs.push([s.run, Math.max(s.run, at)]);
     s.run = null;
+    s.editedAt = at;
   }
 }
 
@@ -99,6 +100,7 @@ function finalize(m, at) {
     s.segs.push([s.run, Math.max(s.run, at)]);
     s.run = null;
   }
+  s.editedAt = at;
   const kept = sessionDur(s) >= Math.max(1000, S().minSave * 1000);
   if (!kept) removeSession(s.id);
   return { session: s, kept };
@@ -237,6 +239,8 @@ export function adjustStopwatch(delta, now = Date.now()) {
   }
   const d = Math.max(delta, -sessionDur(s, now));
   s.adj = (s.adj || 0) + d;
+  s.edited = true;
+  s.editedAt = now;
   R('stopwatch').acc += d;
   commit();
   return d;

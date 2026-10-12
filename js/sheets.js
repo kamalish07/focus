@@ -218,11 +218,11 @@ export function openGoalSheet(onDone, initialTab = 'weekly') {
     if (tab === 'daily') {
       hintEl.textContent = 'How long you want to focus each day, all categories together.';
       presetsEl.innerHTML = dailyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
-      setTo(curDaily || 120);
+      setTo(curDaily);
     } else {
       hintEl.textContent = 'Target focus time per week (Monday to Sunday), all categories together.';
       presetsEl.innerHTML = weeklyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
-      setTo(curWeekly || 900); // 15h default suggestion if 0
+      setTo(curWeekly);
     }
   };
 

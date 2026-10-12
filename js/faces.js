@@ -30,7 +30,11 @@ const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
 /** Builds a face inside `el` (replacing whatever was there). */
 export function makeFace(el, type = 'flip', ctx = {}) {
   if (!FACES.some(([id]) => id === type)) type = 'flip';
-  for (const a of el.getAnimations({ subtree: true })) a.cancel();
+  if (typeof el.getAnimations === 'function') {
+    try {
+      for (const a of el.getAnimations({ subtree: true })) a.cancel();
+    } catch {}
+  }
   el.innerHTML = '';
   el.removeAttribute('style');
   for (const [id] of FACES) el.classList.remove(`face-${id}`);

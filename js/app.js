@@ -578,10 +578,14 @@ on('runner', () => {
  * Phones may pause the page mid-flip and still be resizing it just after unlocking.
  */
 function onReturn() {
-  for (const a of document.getAnimations()) {
-    if (!a.effect?.target?.closest?.('.clock') || !Number.isFinite(a.effect.getComputedTiming().endTime)) continue;
+  if (typeof document.getAnimations === 'function') {
     try {
-      a.finish(); // land any half-turned flip card
+      for (const a of document.getAnimations()) {
+        if (!a.effect?.target?.closest?.('.clock') || !Number.isFinite(a.effect?.getComputedTiming?.()?.endTime)) continue;
+        try {
+          a.finish(); // land any half-turned flip card
+        } catch {}
+      }
     } catch {}
   }
   frame(true);

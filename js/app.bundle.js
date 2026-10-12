@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.11.5';
+const APP_VERSION = '1.11.6';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
 const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
@@ -307,8 +307,13 @@ function normalize(d) {
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
   if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
   const validCatIds = new Set(cats.map((c) => c.id));
-  const rawSessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
+  const rawSessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id) : [];
   for (const s of rawSessions) {
+    if (!Array.isArray(s.segs)) {
+      const start = s.start || Date.now();
+      const dur = s.dur || 0;
+      s.segs = dur > 0 ? [[start, start + dur]] : [];
+    }
     if (!s.cat || s.cat === 'undefined' || !validCatIds.has(s.cat)) {
       s.cat = settings.cat && settings.cat !== NONE && validCatIds.has(settings.cat) ? settings.cat : cats[0]?.id || NONE;
     }
@@ -571,8 +576,11 @@ function removeSession(id) {
 }
 
 function rawDur(s, now = Date.now()) {
+  if (!s) return 0;
   let t = 0;
-  for (const [a, b] of s.segs) t += b - a;
+  if (Array.isArray(s.segs)) {
+    for (const [a, b] of s.segs) t += (b || 0) - (a || 0);
+  }
   if (s.run != null) t += Math.max(0, now - s.run);
   return t;
 }
@@ -807,7 +815,7 @@ function displayMs(m = viewMode, now = Date.now()) {
 /* ---------- internals ---------- */
 
 function openSession(m, at) {
-  const s = { id: uid(), cat: S().cat, mode: m, start: at, segs: [], adj: 0, run: null };
+  const s = { id: uid(), cat: S().cat, mode: m, start: at, segs: [], adj: 0, run: null, editedAt: at };
   data.sessions.push(s);
   R(m).sid = s.id;
   return s;
@@ -827,6 +835,7 @@ function stopAt(m, at) {
   if (s && s.run != null) {
     s.segs.push([s.run, Math.max(s.run, at)]);
     s.run = null;
+    s.editedAt = at;
   }
 }
 
@@ -839,6 +848,7 @@ function finalize(m, at) {
     s.segs.push([s.run, Math.max(s.run, at)]);
     s.run = null;
   }
+  s.editedAt = at;
   const kept = sessionDur(s) >= Math.max(1000, S().minSave * 1000);
   if (!kept) removeSession(s.id);
   return { session: s, kept };
@@ -977,6 +987,8 @@ function adjustStopwatch(delta, now = Date.now()) {
   }
   const d = Math.max(delta, -sessionDur(s, now));
   s.adj = (s.adj || 0) + d;
+  s.edited = true;
+  s.editedAt = now;
   R('stopwatch').acc += d;
   commit();
   return d;
@@ -1579,7 +1591,11 @@ const px = (el, k, v) => el.style.setProperty(k, `${v}px`);
 /** Builds a face inside `el` (replacing whatever was there). */
 function makeFace(el, type = 'flip', ctx = {}) {
   if (!FACES.some(([id]) => id === type)) type = 'flip';
-  for (const a of el.getAnimations({ subtree: true })) a.cancel();
+  if (typeof el.getAnimations === 'function') {
+    try {
+      for (const a of el.getAnimations({ subtree: true })) a.cancel();
+    } catch {}
+  }
   el.innerHTML = '';
   el.removeAttribute('style');
   for (const [id] of FACES) el.classList.remove(`face-${id}`);
@@ -2486,6 +2502,8 @@ let reconnectTimer = 0;
 let refId = 1;
 let isRemoteUpdate = false;
 let realtimeConnected = false;
+let localDirty = false;
+let lastCloudUpdatedAt = null;
 
 function getSupabaseConfig() {
   const url = (localStorage.getItem(KEY_URL) || DEF_URL || '').trim().replace(/\/+$/, '');
@@ -2775,6 +2793,8 @@ async function pullCloudData(sess) {
     const rows = await res.json();
     if (rows && rows.length > 0 && rows[0]) {
       const row = rows[0];
+      lastCloudUpdatedAt = row.updated_at || null;
+      localDirty = false;
       isRemoteUpdate = true;
       try {
         const merged = mergeUserData(data, {
@@ -2800,8 +2820,8 @@ async function pullCloudData(sess) {
 
 function sessionLatestTime(s) {
   if (!s) return 0;
-  let t = s.editedAt || s.start || 0;
-  if (s.segs && s.segs.length) {
+  let t = Math.max(s.editedAt || 0, s.start || 0);
+  if (Array.isArray(s.segs) && s.segs.length) {
     for (const seg of s.segs) {
       if (seg && seg[1] && seg[1] > t) t = seg[1];
     }
@@ -2819,10 +2839,10 @@ function pickNewerSession(a, b) {
   const bRunning = b.run != null;
 
   if (aRunning && !bRunning) {
-    return bLatest >= a.run ? b : a;
+    return (b.editedAt || 0) > a.run ? b : a;
   }
   if (!aRunning && bRunning) {
-    return aLatest >= b.run ? a : b;
+    return (a.editedAt || 0) > b.run ? a : b;
   }
   if (aRunning && bRunning) {
     return (a.run || 0) >= (b.run || 0) ? a : b;
@@ -2999,6 +3019,8 @@ async function signOut() {
     }).catch(() => {});
   }
   saveSession(null);
+  lastCloudUpdatedAt = null;
+  localDirty = false;
   resetAll();
   syncState = 'idle';
   lastError = '';
@@ -3029,8 +3051,10 @@ async function sync(options = {}) {
   const { url, key } = getSupabaseConfig();
   if (!url || !key) return { ok: false, reason: 'not_configured' };
 
-  syncState = 'syncing';
-  emit('sync-status');
+  if (!options.silent) {
+    syncState = 'syncing';
+    emit('sync-status');
+  }
 
   try {
     const getRes = await fetch(`${url}/rest/v1/user_data?select=*`, {
@@ -3046,40 +3070,55 @@ async function sync(options = {}) {
     const rows = await getRes.json();
     const cloudRow = rows && rows[0];
 
-    isRemoteUpdate = true;
-    let merged;
-    try {
-      merged = mergeUserData(data, {
-        settings: cloudRow?.settings || {},
-        cats: cloudRow?.cats || [],
-        sessions: cloudRow?.sessions || [],
-        runners: cloudRow?.settings?._runners || cloudRow?.runners || null,
-      });
-      replaceAll(merged);
-    } finally {
-      isRemoteUpdate = false;
+    const cloudHasNewerData = !!(
+      cloudRow &&
+      (options.forcePull || !lastCloudUpdatedAt || (cloudRow.updated_at && cloudRow.updated_at !== lastCloudUpdatedAt))
+    );
+
+    if (cloudHasNewerData && cloudRow) {
+      isRemoteUpdate = true;
+      try {
+        const merged = mergeUserData(data, {
+          settings: cloudRow.settings || {},
+          cats: cloudRow.cats || [],
+          sessions: cloudRow.sessions || [],
+          runners: cloudRow.settings?._runners || cloudRow.runners || null,
+        });
+        replaceAll(merged);
+      } finally {
+        isRemoteUpdate = false;
+      }
+      lastCloudUpdatedAt = cloudRow.updated_at;
     }
 
-    const postRes = await fetch(`${url}/rest/v1/user_data`, {
-      method: 'POST',
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${sess.access_token}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates',
-      },
-      body: JSON.stringify({
-        user_id: sess.user.id,
-        settings: { ...merged.settings, _runners: merged.runners },
-        cats: merged.cats,
-        sessions: merged.sessions,
-        updated_at: new Date().toISOString(),
-      }),
-    });
+    const shouldPush = localDirty || !cloudRow || options.forcePush;
 
-    if (!postRes.ok) {
-      const err = await postRes.json().catch(() => ({}));
-      throw new Error(err.message || 'Failed to save to cloud');
+    if (shouldPush) {
+      const newUpdatedAt = new Date().toISOString();
+      const postRes = await fetch(`${url}/rest/v1/user_data`, {
+        method: 'POST',
+        headers: {
+          apikey: key,
+          Authorization: `Bearer ${sess.access_token}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify({
+          user_id: sess.user.id,
+          settings: { ...data.settings, _runners: data.runners },
+          cats: data.cats,
+          sessions: data.sessions,
+          updated_at: newUpdatedAt,
+        }),
+      });
+
+      if (!postRes.ok) {
+        const err = await postRes.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to save to cloud');
+      }
+
+      lastCloudUpdatedAt = newUpdatedAt;
+      localDirty = false;
     }
 
     syncState = 'synced';
@@ -3113,23 +3152,27 @@ function getSyncStatus() {
 
 function scheduleAutoSync() {
   if (!currentUser() || isRemoteUpdate) return;
+  localDirty = true;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
     sync({ silent: true });
-  }, 400);
+  }, 800);
 }
 
 function initAutoSync() {
   // Live broadcast on runner updates
   on('runner', () => {
     if (!isRemoteUpdate && currentUser()) {
+      localDirty = true;
       broadcastLiveRunner();
+      scheduleAutoSync();
     }
   });
 
   // Broadcast data changes & sync
   on('change', () => {
     if (!isRemoteUpdate && currentUser()) {
+      localDirty = true;
       broadcastLiveRunner();
       broadcastDataSync({
         settings: data.settings,
@@ -3141,12 +3184,12 @@ function initAutoSync() {
     }
   });
 
-  // Fast background polling fallback so devices are always in sync even if WebSockets sleep
+  // Fallback background polling so devices stay in sync even if WebSockets sleep or wake up
   setInterval(() => {
     if (!document.hidden && currentUser() && !isRemoteUpdate) {
       sync({ silent: true });
     }
-  }, 2500);
+  }, 20000);
 
   window.addEventListener('online', () => {
     connectRealtime();
@@ -3390,11 +3433,11 @@ function openGoalSheet(onDone, initialTab = 'weekly') {
     if (tab === 'daily') {
       hintEl.textContent = 'How long you want to focus each day, all categories together.';
       presetsEl.innerHTML = dailyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
-      setTo(curDaily || 120);
+      setTo(curDaily);
     } else {
       hintEl.textContent = 'Target focus time per week (Monday to Sunday), all categories together.';
       presetsEl.innerHTML = weeklyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
-      setTo(curWeekly || 900); // 15h default suggestion if 0
+      setTo(curWeekly);
     }
   };
 
@@ -4157,7 +4200,7 @@ function mountStats(root, { visible = () => true } = {}) {
       let yTop = y(0);
       if (b.total > 0) {
         yTop = Math.min(y(b.total), y(0) - 2);
-        const r = Math.min(4, bw / 2, y(0) - yTop);
+        const r = Math.max(0, Math.min(4, bw / 2, y(0) - yTop));
         defs += `<clipPath id="bc${i}"><path d="M${x},${y(0)}V${yTop + r}A${r},${r} 0 0 1 ${x + r},${yTop}H${x + bw - r}A${r},${r} 0 0 1 ${x + bw},${yTop + r}V${y(0)}Z"/></clipPath>`;
         const present = order.filter((id) => b.cats[id] > 0);
         let acc = 0;
@@ -4535,7 +4578,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
       const x = cx - bw / 2;
       if (d.v > 0) {
         const top = Math.min(y(d.v), y(0) - 3);
-        const r = Math.min(4, bw / 2, y(0) - top);
+        const r = Math.max(0, Math.min(4, bw / 2, y(0) - top));
         g += `<path class="wbar${d.today ? ' today' : ''}" d="M${x},${y(0)}V${top + r}A${r},${r} 0 0 1 ${x + r},${top}H${x + bw - r}A${r},${r} 0 0 1 ${x + bw},${top + r}V${y(0)}Z"><title>${esc(d.long)}: ${fmtDur(d.v)}</title></path>`;
         if (d.today) g += `<text class="wval" x="${cx}" y="${top - 6}" text-anchor="middle">${fmtDur(d.v)}</text>`;
       }
@@ -4635,7 +4678,8 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     if (heat) {
       const { svg, note } = heatSvg(Math.max(200, heat.clientWidth), now);
       heat.innerHTML = svg;
-      heat.closest('.dash-card').querySelector('[data-note]').textContent = note;
+      const noteEl = heat.closest('.dash-card')?.querySelector('[data-note]');
+      if (noteEl) noteEl.textContent = note;
     }
   }
 
@@ -6336,10 +6380,14 @@ on('runner', () => {
  * Phones may pause the page mid-flip and still be resizing it just after unlocking.
  */
 function onReturn() {
-  for (const a of document.getAnimations()) {
-    if (!a.effect?.target?.closest?.('.clock') || !Number.isFinite(a.effect.getComputedTiming().endTime)) continue;
+  if (typeof document.getAnimations === 'function') {
     try {
-      a.finish(); // land any half-turned flip card
+      for (const a of document.getAnimations()) {
+        if (!a.effect?.target?.closest?.('.clock') || !Number.isFinite(a.effect?.getComputedTiming?.()?.endTime)) continue;
+        try {
+          a.finish(); // land any half-turned flip card
+        } catch {}
+      }
     } catch {}
   }
   frame(true);
