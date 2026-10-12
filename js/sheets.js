@@ -1,4 +1,4 @@
-import { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, sessionInfo, nextColor, NONE } from './store.js';
+import { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, rawDur, sessionDur, sessionInfo, nextColor, NONE } from './store.js';
 import { PALETTE, TIMER_PRESETS } from './config.js';
 import * as engine from './engine.js';
 import { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } from './ui.js';
@@ -132,42 +132,98 @@ function editPomodoro() {
 
 /* ---------- daily goal ---------- */
 
-/** One goal for the whole day: the total across every category. */
-export function openGoalSheet(onDone) {
-  const cur = data.settings.goal || 0;
-  const presets = [30, 60, 120, 180, 240, 360];
+/** Goal sheet: set Daily and Weekly focus goals. */
+export function openGoalSheet(onDone, initialTab = 'daily') {
+  let tab = initialTab === 'weekly' ? 'weekly' : 'daily';
+  let curDaily = data.settings.goal || 0;
+  let curWeekly = data.settings.weeklyGoal || 0;
+
+  const dailyPresets = [30, 60, 120, 180, 240, 360];
+  const weeklyPresets = [300, 600, 900, 1200, 1500, 1800, 2400]; // 5h, 10h, 15h, 20h, 25h, 30h, 40h
+
   const sh = sheet({
-    title: 'Daily goal',
-    body: `<p class="hint">How long you want to focus each day, all categories together.</p>
+    title: 'Focus goals',
+    body: `
+      <div class="seg" role="tablist" style="margin-bottom:14px">
+        <button role="tab" data-tab="daily" aria-selected="${tab === 'daily'}">Daily goal</button>
+        <button role="tab" data-tab="weekly" aria-selected="${tab === 'weekly'}">Weekly goal</button>
+      </div>
+      <p class="hint" data-hint></p>
       <div class="wheels"></div>
-      <div class="chips center">${presets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('')}</div>
-      ${actions(cur ? 'Save' : 'Set goal', cur ? '<button class="btn" data-clear>No goal</button>' : '')}`,
+      <div class="chips center" data-presets></div>
+      ${actions('Save goals', '<button class="btn" data-clear>Clear</button>')}`,
   });
+
   const box = sh.body.querySelector('.wheels');
-  const wh = wheel({ max: 16, label: 'h' });
+  const wh = wheel({ max: 80, label: 'h' });
   const wm = wheel({ max: 55, step: 5, label: 'm' });
   box.append(wh, wm);
+
+  const hintEl = sh.body.querySelector('[data-hint]');
+  const presetsEl = sh.body.querySelector('[data-presets]');
+
   const setTo = (m, smooth) => {
     wh.set(Math.floor(m / 60), smooth);
     wm.set(Math.round((m % 60) / 5) * 5, smooth);
   };
-  setTo(cur || 120);
-  const done = (v) => {
-    data.settings.goal = v;
-    save();
-    sh.close();
-    onDone?.();
-    toast(v ? `Daily goal: ${fmtDur(v * MIN)}` : 'Daily goal removed');
+
+  const syncTabUI = () => {
+    sh.body.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    if (tab === 'daily') {
+      hintEl.textContent = 'How long you want to focus each day, all categories together.';
+      presetsEl.innerHTML = dailyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
+      setTo(curDaily || 120);
+    } else {
+      hintEl.textContent = 'Target focus time per week (Monday to Sunday), all categories together.';
+      presetsEl.innerHTML = weeklyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
+      setTo(curWeekly || 900); // 15h default
+    }
   };
+
+  syncTabUI();
+
   sh.body.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('[data-tab]');
+    if (tabBtn) {
+      const val = wh.get() * 60 + wm.get();
+      if (tab === 'daily') curDaily = val;
+      else curWeekly = val;
+      tab = tabBtn.dataset.tab;
+      syncTabUI();
+      haptic();
+      return;
+    }
     const set = e.target.closest('[data-set]');
     if (set) {
       setTo(Number(set.dataset.set), true);
       haptic();
       return;
     }
-    if (e.target.closest('[data-clear]')) return done(0);
-    if (e.target.closest('[data-save]')) done(wh.get() * 60 + wm.get());
+    if (e.target.closest('[data-clear]')) {
+      if (tab === 'daily') {
+        curDaily = 0;
+        toast('Daily goal cleared');
+      } else {
+        curWeekly = 0;
+        toast('Weekly goal cleared');
+      }
+      setTo(0);
+      return;
+    }
+    if (e.target.closest('[data-save]')) {
+      const curVal = wh.get() * 60 + wm.get();
+      if (tab === 'daily') curDaily = curVal;
+      else curWeekly = curVal;
+      data.settings.goal = curDaily;
+      data.settings.weeklyGoal = curWeekly;
+      save();
+      sh.close();
+      onDone?.();
+      const parts = [];
+      if (curDaily) parts.push(`Daily: ${fmtDur(curDaily * MIN)}`);
+      if (curWeekly) parts.push(`Weekly: ${fmtDur(curWeekly * MIN)}`);
+      toast(parts.length ? `Goals saved · ${parts.join(' · ')}` : 'Goals updated');
+    }
   });
 }
 
@@ -445,17 +501,22 @@ export function openSessionEditor(s, dayK, onDone) {
     const [hh, mi] = tv.split(':').map(Number);
     const timeChanged = dv !== dateVal || tv !== timeVal;
     const durChanged = wh.get() !== Math.min(23, h0) || wm.get() !== m0;
-    const newStart = timeChanged || isNew ? new Date(y, mo - 1, da, hh, mi).getTime() : start;
+    let newStart = timeChanged || isNew ? new Date(y, mo - 1, da, hh, mi).getTime() : start;
     const newDur = durChanged || isNew ? wh.get() * HOUR + wm.get() * MIN : dur;
     if (newDur <= 0) return toast('Duration must be more than zero');
-    if (newStart + newDur > Date.now() + MIN) return toast('A session can’t end in the future');
+    const now = Date.now();
+    if (newStart + newDur > now + MIN) {
+      if (timeChanged && newStart > now) return toast('A session can’t start in the future');
+      newStart = Math.max(0, now - newDur);
+    }
     const note = sh.body.querySelector('[data-note]').value.trim();
     if (isNew) {
       data.sessions.push({ id: uid(), cat: catId, mode: 'manual', start: newStart, segs: [[newStart, newStart + newDur]], adj: 0, run: null, note, edited: false });
     } else {
       const anyChange = timeChanged || durChanged || s.cat !== catId || s.note !== note;
       if (timeChanged || durChanged) {
-        if (!s.originalDur) s.originalDur = dur;
+        const orig = s.originalDur || (s.adj ? rawDur(s) : dur);
+        s.originalDur = orig;
         s.edited = true;
         s.editedAt = Date.now();
         s.start = newStart;

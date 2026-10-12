@@ -184,6 +184,7 @@ export function openSettings() {
           'Tracking',
           row('Categories', '<button class="btn sm" data-cats>Edit</button>', 'Add, rename, recolour or delete') +
             row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
+            row('Weekly goal', stepperEl('weeklyGoal', s.weeklyGoal || 0, { min: 0, max: 6000, step: 60, fmt: 'goal' }, 'weekly goal'), 'Target focus time per week (0 = no goal)') +
             row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
             row(
               'New day starts at',

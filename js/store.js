@@ -41,6 +41,7 @@ export const DEFAULT_SETTINGS = {
   volume: 0.8,
   vibrate: true,
   goal: 0, // daily goal in minutes, all categories together; 0 = no goal
+  weeklyGoal: 0, // weekly goal in minutes, all categories together; 0 = no goal
   weekStart: 1,
   dayStart: 0, // hour a new "day" begins, for night owls
   minSave: 30, // seconds; shorter sessions are not kept
@@ -94,6 +95,7 @@ function normalize(d) {
   if ((d.v || 1) < 4) for (const c of d.cats || []) if (c && c.id === 'study' && c.goal === 180) c.goal = 0;
   // Version 5: the daily goal is one explicit total. Keep what the category goals used to add up to.
   if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
+  settings.weeklyGoal = Math.max(0, Number(d.settings?.weeklyGoal || 0));
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
   // 1.9.0 let Home pick just a clock style; that becomes Home's own look.
@@ -103,7 +105,18 @@ function normalize(d) {
   // Categories are optional: an empty list is fine (everything is then "No category").
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
   if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
-  const sessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
+  const validCatIds = new Set(cats.map((c) => c.id));
+  const rawSessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
+  for (const s of rawSessions) {
+    if (!s.cat || s.cat === 'undefined' || !validCatIds.has(s.cat)) {
+      s.cat = settings.cat && settings.cat !== NONE && validCatIds.has(settings.cat) ? settings.cat : cats[0]?.id || NONE;
+    }
+  }
+  const sessions = rawSessions.filter((s) => {
+    if (s.run != null) return true;
+    const dur = sessionDur(s);
+    return dur > 0 || (s.note && s.note.trim()) || (s.adj && s.adj !== 0);
+  });
   const ids = new Set(sessions.map((s) => s.id));
 
   const existingRunners = d.runners || (typeof data !== 'undefined' && data?.runners ? data.runners : null);
@@ -301,6 +314,11 @@ export function goalFor(catId) {
   return (data.settings.goal || 0) * MIN;
 }
 
+/** Weekly goal in ms. 0 = no goal. */
+export function weeklyGoal() {
+  return (data.settings.weeklyGoal || 0) * MIN;
+}
+
 export function nextColor() {
   const used = new Set(data.cats.map((c) => c.color));
   return PALETTE.find((c) => !used.has(c)) || PALETTE[data.cats.length % PALETTE.length];
@@ -363,14 +381,16 @@ export const sessionDur = (s, now = Date.now()) => Math.max(0, rawDur(s, now) + 
 export function sessionEnd(s, now = Date.now()) {
   if (s.run != null) return now;
   const last = s.segs[s.segs.length - 1];
-  return last ? last[1] : s.start;
+  const rawEnd = last ? last[1] : s.start;
+  const adj = s.adj || 0;
+  return adj !== 0 ? Math.max(rawEnd, s.start + sessionDur(s, now)) : rawEnd;
 }
 
 /** Comprehensive session details: accurate time range, worked vs edited time, breaks and mode. */
 export function sessionInfo(s, now = Date.now()) {
   const raw = rawDur(s, now);
   const dur = sessionDur(s, now);
-  const adj = s.adj || 0;
+  const adj = s.adj || (s.originalDur ? dur - s.originalDur : 0);
   const isLive = s.run != null;
   const rawEnd = sessionEnd(s, now);
   const effectiveEnd = Math.max(rawEnd, s.start + dur);
@@ -391,7 +411,7 @@ export function sessionInfo(s, now = Date.now()) {
     end,
     rawEnd,
     dur,
-    raw,
+    raw: s.originalDur || raw,
     adj,
     breakMs,
     isLive,

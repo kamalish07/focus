@@ -1,6 +1,6 @@
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev, on } from './store.js';
+import { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, weeklyGoal, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev, on } from './store.js';
 import * as engine from './engine.js';
 import { makeFace, homeFaceType } from './faces.js';
 import { icon } from './ui.js';
@@ -190,7 +190,7 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     const H = 140;
     const M = { t: 20, b: 22, l: 2, r: 2 };
     const ph = H - M.t - M.b;
-    const max = Math.max(goal, ...list.map((d) => d.v), 30 * MIN) * 1.05;
+    const max = Math.max(goal, ...list.map((d) => d.v), goal ? 0 : 5 * MIN) * 1.05;
     const y = (v) => M.t + ph - (v / max) * ph;
     const slotW = (W - M.l - M.r) / 7;
     const bw = Math.min(24, slotW * 0.55);
@@ -315,9 +315,22 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     drawnKey = key;
     const t = dayKey(now);
     const goal = goalFor(null);
+    const wGoal = weeklyGoal();
+    const ws = weekStartKey(t);
+    let weekTotal = 0;
+    for (let i = 0; i < 7; i++) {
+      const k = addDays(ws, i);
+      if (k <= t) weekTotal += dayData(k, now).total;
+    }
+    const weekGoalPill = wGoal
+      ? `<button class="chip sm ghost legend-goal" data-goal-weekly title="Weekly goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>${fmtDur(weekTotal)} / ${fmtDur(wGoal)}</button>`
+      : goal
+        ? `<button class="chip sm ghost legend-goal" data-goal-daily title="Daily goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>Goal ${fmtDur(goal)}</button>`
+        : `<button class="chip sm ghost legend-goal" data-goal-weekly title="Set weekly goal" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px">${icon('plus')} Goal</button>`;
+
     bento.innerHTML =
       todayCard(dayData(t, now), now) +
-        `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${goal ? `<span class="legend-goal"><i></i>Goal ${fmtDur(goal)}</span>` : ''}</div><div class="chart-slot" data-chart="week"></div></section>` +
+        `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${weekGoalPill}</div><div class="chart-slot" data-chart="week"></div></section>` +
         `<section class="dash-card g-m"><div class="card-head"><h3>Consistency</h3><span data-note></span></div><div class="chart-slot" data-chart="heat"></div>
           <div class="hm-legend"><span>Less</span>${HEAT.map((f) => `<i style="background:${f}"></i>`).join('')}<span>More</span>${goal ? '<span class="hm-note">· full colour = goal met</span>' : ''}</div></section>` +
         recentCard(now) +
@@ -354,7 +367,8 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
     }
     if (e.target.closest('[data-settings]')) return openSettings();
     if (e.target.closest('[data-looks]')) return openLooks();
-    if (e.target.closest('[data-goal]')) return openGoalSheet(refresh);
+    if (e.target.closest('[data-goal]') || e.target.closest('[data-goal-daily]')) return openGoalSheet(refresh, 'daily');
+    if (e.target.closest('[data-goal-weekly]')) return openGoalSheet(refresh, 'weekly');
     if (e.target.closest('[data-cue]')) return root.scrollTo({ top: bento.offsetTop - parseFloat(getComputedStyle(root).paddingTop), behavior: 'smooth' });
     const go = e.target.closest('[data-go]');
     if (go) return goTab(go.dataset.go);

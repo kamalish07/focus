@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.11.3';
+const APP_VERSION = '1.11.4';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
 const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
@@ -242,6 +242,7 @@ const DEFAULT_SETTINGS = {
   volume: 0.8,
   vibrate: true,
   goal: 0, // daily goal in minutes, all categories together; 0 = no goal
+  weeklyGoal: 0, // weekly goal in minutes, all categories together; 0 = no goal
   weekStart: 1,
   dayStart: 0, // hour a new "day" begins, for night owls
   minSave: 30, // seconds; shorter sessions are not kept
@@ -295,6 +296,7 @@ function normalize(d) {
   if ((d.v || 1) < 4) for (const c of d.cats || []) if (c && c.id === 'study' && c.goal === 180) c.goal = 0;
   // Version 5: the daily goal is one explicit total. Keep what the category goals used to add up to.
   if ((d.v || 1) < 5 && !settings.goal) settings.goal = (d.cats || []).reduce((a, c) => a + (c?.goal || 0), 0);
+  settings.weeklyGoal = Math.max(0, Number(d.settings?.weeklyGoal || 0));
   settings.pomo = { ...def.settings.pomo, ...(d.settings?.pomo || {}) };
   settings.custom = { ...def.settings.custom, ...(d.settings?.custom || {}) };
   // 1.9.0 let Home pick just a clock style; that becomes Home's own look.
@@ -304,7 +306,18 @@ function normalize(d) {
   // Categories are optional: an empty list is fine (everything is then "No category").
   const cats = Array.isArray(d.cats) ? d.cats.filter((c) => c && c.id && c.id !== NONE) : def.cats;
   if (settings.cat !== NONE && !cats.some((c) => c.id === settings.cat)) settings.cat = cats[0]?.id || NONE;
-  const sessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
+  const validCatIds = new Set(cats.map((c) => c.id));
+  const rawSessions = Array.isArray(d.sessions) ? d.sessions.filter((s) => s && s.id && Array.isArray(s.segs)) : [];
+  for (const s of rawSessions) {
+    if (!s.cat || s.cat === 'undefined' || !validCatIds.has(s.cat)) {
+      s.cat = settings.cat && settings.cat !== NONE && validCatIds.has(settings.cat) ? settings.cat : cats[0]?.id || NONE;
+    }
+  }
+  const sessions = rawSessions.filter((s) => {
+    if (s.run != null) return true;
+    const dur = sessionDur(s);
+    return dur > 0 || (s.note && s.note.trim()) || (s.adj && s.adj !== 0);
+  });
   const ids = new Set(sessions.map((s) => s.id));
 
   const existingRunners = d.runners || (typeof data !== 'undefined' && data?.runners ? data.runners : null);
@@ -502,6 +515,11 @@ function goalFor(catId) {
   return (data.settings.goal || 0) * MIN;
 }
 
+/** Weekly goal in ms. 0 = no goal. */
+function weeklyGoal() {
+  return (data.settings.weeklyGoal || 0) * MIN;
+}
+
 function nextColor() {
   const used = new Set(data.cats.map((c) => c.color));
   return PALETTE.find((c) => !used.has(c)) || PALETTE[data.cats.length % PALETTE.length];
@@ -564,14 +582,16 @@ const sessionDur = (s, now = Date.now()) => Math.max(0, rawDur(s, now) + (s.adj 
 function sessionEnd(s, now = Date.now()) {
   if (s.run != null) return now;
   const last = s.segs[s.segs.length - 1];
-  return last ? last[1] : s.start;
+  const rawEnd = last ? last[1] : s.start;
+  const adj = s.adj || 0;
+  return adj !== 0 ? Math.max(rawEnd, s.start + sessionDur(s, now)) : rawEnd;
 }
 
 /** Comprehensive session details: accurate time range, worked vs edited time, breaks and mode. */
 function sessionInfo(s, now = Date.now()) {
   const raw = rawDur(s, now);
   const dur = sessionDur(s, now);
-  const adj = s.adj || 0;
+  const adj = s.adj || (s.originalDur ? dur - s.originalDur : 0);
   const isLive = s.run != null;
   const rawEnd = sessionEnd(s, now);
   const effectiveEnd = Math.max(rawEnd, s.start + dur);
@@ -592,7 +612,7 @@ function sessionInfo(s, now = Date.now()) {
     end,
     rawEnd,
     dur,
-    raw,
+    raw: s.originalDur || raw,
     adj,
     breakMs,
     isLive,
@@ -713,7 +733,7 @@ function streak(catId = null, now = Date.now()) {
   }
   return n;
 }
-return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, copyLook, lookOf, lookTarget, lookScope, shownLook, setTabScope, pushScope, on, emit, dataRev, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, sessionInfo, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
+return { NONE, DEFAULT_SETTINGS, MODES, freshRunner, DEMO, data, copyLook, lookOf, lookTarget, lookScope, shownLook, setTabScope, pushScope, on, emit, dataRev, save, saveSoon, replaceAll, resetAll, catById, currentCat, usesNone, goalFor, weeklyGoal, nextColor, keyOf, keyDate, dayKey, addDays, dayStartTs, dayEndTs, weekStartKey, getSession, removeSession, rawDur, sessionDur, sessionEnd, sessionInfo, dayData, bestStreak, recentSessions, sessionsOnDay, streak };
 })();
 
 // ---------- engine.js ----------
@@ -3132,7 +3152,7 @@ return { getSupabaseConfig, setSupabaseConfig, isConfigured, getStoredSession, c
 
 // ---------- sheets.js ----------
 __m.sheets = (() => {
-const { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
+const { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, rawDur, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
 const { PALETTE, TIMER_PRESETS } = __m.config;
 const engine = __m.engine;
 const { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } = __m.ui;
@@ -3266,42 +3286,98 @@ function editPomodoro() {
 
 /* ---------- daily goal ---------- */
 
-/** One goal for the whole day: the total across every category. */
-function openGoalSheet(onDone) {
-  const cur = data.settings.goal || 0;
-  const presets = [30, 60, 120, 180, 240, 360];
+/** Goal sheet: set Daily and Weekly focus goals. */
+function openGoalSheet(onDone, initialTab = 'daily') {
+  let tab = initialTab === 'weekly' ? 'weekly' : 'daily';
+  let curDaily = data.settings.goal || 0;
+  let curWeekly = data.settings.weeklyGoal || 0;
+
+  const dailyPresets = [30, 60, 120, 180, 240, 360];
+  const weeklyPresets = [300, 600, 900, 1200, 1500, 1800, 2400]; // 5h, 10h, 15h, 20h, 25h, 30h, 40h
+
   const sh = sheet({
-    title: 'Daily goal',
-    body: `<p class="hint">How long you want to focus each day, all categories together.</p>
+    title: 'Focus goals',
+    body: `
+      <div class="seg" role="tablist" style="margin-bottom:14px">
+        <button role="tab" data-tab="daily" aria-selected="${tab === 'daily'}">Daily goal</button>
+        <button role="tab" data-tab="weekly" aria-selected="${tab === 'weekly'}">Weekly goal</button>
+      </div>
+      <p class="hint" data-hint></p>
       <div class="wheels"></div>
-      <div class="chips center">${presets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('')}</div>
-      ${actions(cur ? 'Save' : 'Set goal', cur ? '<button class="btn" data-clear>No goal</button>' : '')}`,
+      <div class="chips center" data-presets></div>
+      ${actions('Save goals', '<button class="btn" data-clear>Clear</button>')}`,
   });
+
   const box = sh.body.querySelector('.wheels');
-  const wh = wheel({ max: 16, label: 'h' });
+  const wh = wheel({ max: 80, label: 'h' });
   const wm = wheel({ max: 55, step: 5, label: 'm' });
   box.append(wh, wm);
+
+  const hintEl = sh.body.querySelector('[data-hint]');
+  const presetsEl = sh.body.querySelector('[data-presets]');
+
   const setTo = (m, smooth) => {
     wh.set(Math.floor(m / 60), smooth);
     wm.set(Math.round((m % 60) / 5) * 5, smooth);
   };
-  setTo(cur || 120);
-  const done = (v) => {
-    data.settings.goal = v;
-    save();
-    sh.close();
-    onDone?.();
-    toast(v ? `Daily goal: ${fmtDur(v * MIN)}` : 'Daily goal removed');
+
+  const syncTabUI = () => {
+    sh.body.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === tab)));
+    if (tab === 'daily') {
+      hintEl.textContent = 'How long you want to focus each day, all categories together.';
+      presetsEl.innerHTML = dailyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
+      setTo(curDaily || 120);
+    } else {
+      hintEl.textContent = 'Target focus time per week (Monday to Sunday), all categories together.';
+      presetsEl.innerHTML = weeklyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
+      setTo(curWeekly || 900); // 15h default
+    }
   };
+
+  syncTabUI();
+
   sh.body.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('[data-tab]');
+    if (tabBtn) {
+      const val = wh.get() * 60 + wm.get();
+      if (tab === 'daily') curDaily = val;
+      else curWeekly = val;
+      tab = tabBtn.dataset.tab;
+      syncTabUI();
+      haptic();
+      return;
+    }
     const set = e.target.closest('[data-set]');
     if (set) {
       setTo(Number(set.dataset.set), true);
       haptic();
       return;
     }
-    if (e.target.closest('[data-clear]')) return done(0);
-    if (e.target.closest('[data-save]')) done(wh.get() * 60 + wm.get());
+    if (e.target.closest('[data-clear]')) {
+      if (tab === 'daily') {
+        curDaily = 0;
+        toast('Daily goal cleared');
+      } else {
+        curWeekly = 0;
+        toast('Weekly goal cleared');
+      }
+      setTo(0);
+      return;
+    }
+    if (e.target.closest('[data-save]')) {
+      const curVal = wh.get() * 60 + wm.get();
+      if (tab === 'daily') curDaily = curVal;
+      else curWeekly = curVal;
+      data.settings.goal = curDaily;
+      data.settings.weeklyGoal = curWeekly;
+      save();
+      sh.close();
+      onDone?.();
+      const parts = [];
+      if (curDaily) parts.push(`Daily: ${fmtDur(curDaily * MIN)}`);
+      if (curWeekly) parts.push(`Weekly: ${fmtDur(curWeekly * MIN)}`);
+      toast(parts.length ? `Goals saved · ${parts.join(' · ')}` : 'Goals updated');
+    }
   });
 }
 
@@ -3579,17 +3655,22 @@ function openSessionEditor(s, dayK, onDone) {
     const [hh, mi] = tv.split(':').map(Number);
     const timeChanged = dv !== dateVal || tv !== timeVal;
     const durChanged = wh.get() !== Math.min(23, h0) || wm.get() !== m0;
-    const newStart = timeChanged || isNew ? new Date(y, mo - 1, da, hh, mi).getTime() : start;
+    let newStart = timeChanged || isNew ? new Date(y, mo - 1, da, hh, mi).getTime() : start;
     const newDur = durChanged || isNew ? wh.get() * HOUR + wm.get() * MIN : dur;
     if (newDur <= 0) return toast('Duration must be more than zero');
-    if (newStart + newDur > Date.now() + MIN) return toast('A session can’t end in the future');
+    const now = Date.now();
+    if (newStart + newDur > now + MIN) {
+      if (timeChanged && newStart > now) return toast('A session can’t start in the future');
+      newStart = Math.max(0, now - newDur);
+    }
     const note = sh.body.querySelector('[data-note]').value.trim();
     if (isNew) {
       data.sessions.push({ id: uid(), cat: catId, mode: 'manual', start: newStart, segs: [[newStart, newStart + newDur]], adj: 0, run: null, note, edited: false });
     } else {
       const anyChange = timeChanged || durChanged || s.cat !== catId || s.note !== note;
       if (timeChanged || durChanged) {
-        if (!s.originalDur) s.originalDur = dur;
+        const orig = s.originalDur || (s.adj ? rawDur(s) : dur);
+        s.originalDur = orig;
         s.edited = true;
         s.editedAt = Date.now();
         s.start = newStart;
@@ -3753,18 +3834,22 @@ return { openEditor, openGoalSheet, openCategories, deleteCategory, openCategory
 
 // ---------- stats.js ----------
 __m.stats = (() => {
-const { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, streak, NONE, usesNone } = __m.store;
+const { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, weeklyGoal, catById, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, streak, NONE, usesNone } = __m.store;
 const { icon } = __m.ui;
-const { openSessionEditor, openCategoryEditor, deleteCategory } = __m.sheets;
+const { openSessionEditor, openCategoryEditor, deleteCategory, openGoalSheet } = __m.sheets;
 const engine = __m.engine;
 const { esc, fmtDur, fmtTime, fmtDate, clamp, MIN, HOUR } = __m.util;
 
 const MODE_ICON = { stopwatch: 'stopwatch', timer: 'timer', pomodoro: 'pomodoro', manual: 'manual' };
 const MODE_NAME = { stopwatch: 'Stopwatch', timer: 'Timer', pomodoro: 'Pomodoro', manual: 'Added manually' };
-const STEPS_MIN = [5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 960, 1200, 1440, 1800, 2400, 3000, 3600, 4800, 6000, 7200, 9000, 12000];
+const STEPS_MIN = [1, 2, 5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 960, 1200, 1440, 1800, 2400, 3000, 3600, 4800, 6000, 7200, 9000, 12000];
 
 const niceStep = (max) => (STEPS_MIN.find((m) => max / (m * MIN) <= 4) || 24000) * MIN;
-const axisFmt = (ms) => (ms < HOUR ? `${Math.round(ms / MIN)}m` : `${+(ms / HOUR).toFixed(1)}h`);
+const axisFmt = (ms) => {
+  if (ms < MIN) return `${Math.round(ms / 1000)}s`;
+  if (ms < HOUR) return `${Math.round(ms / MIN)}m`;
+  return `${+(ms / HOUR).toFixed(1)}h`;
+};
 const fmtDay = (k, opts) => fmtDate(keyDate(k), opts);
 
 /** Renders the Statistics tab into `root`. Call refresh() whenever the tab is shown. */
@@ -3873,6 +3958,7 @@ function mountStats(root, { visible = () => true } = {}) {
     }
     const days = streak(st.cat);
     const current = keys.includes(t);
+    const wGoal = st.cat ? 0 : weeklyGoal();
     const period = current ? { week: 'This week', month: 'This month', year: 'This year' }[st.range] : 'Total';
     const rangeTotals = {};
     for (const b of st.buckets) for (const [id, v] of Object.entries(b.cats)) rangeTotals[id] = (rangeTotals[id] || 0) + v;
@@ -3913,6 +3999,15 @@ function mountStats(root, { visible = () => true } = {}) {
           <div><span>Daily average</span><b>${fmtDur(avg)}</b></div>
           <div><span>Best day</span><b>${best.ms ? fmtDur(best.ms) : '0m'}</b>${best.k ? `<small>${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</small>` : ''}</div>
           <div><span>Streak</span><b>${days} ${days === 1 ? 'day' : 'days'}</b></div>
+          ${
+            st.range === 'week'
+              ? `<div class="stat-goal-tile" role="button" tabindex="0" data-goal-opt="weekly" style="cursor:pointer" title="Weekly goal · Tap to edit">
+                  <span style="display:flex;align-items:center;gap:4px">Weekly goal ${icon('edit', 'inline')}</span>
+                  <b>${wGoal ? fmtDur(wGoal) : 'Set goal'}</b>
+                  ${wGoal ? `<small>${Math.round((total / wGoal) * 100)}% met</small>` : '<small>Tap to set</small>'}
+                </div>`
+              : ''
+          }
         </div>
       </section>
       <section class="chart-card">
@@ -3951,7 +4046,7 @@ function mountStats(root, { visible = () => true } = {}) {
     const pw = W - M.l - M.r;
     const ph = H - M.t - M.b;
     const goal = st.range === 'year' ? 0 : goalFor(st.cat);
-    const maxV = Math.max(goal, ...bs.map((b) => b.total), 30 * MIN);
+    const maxV = Math.max(goal, ...bs.map((b) => b.total), goal ? 0 : 5 * MIN);
     const step = niceStep(maxV);
     const top = Math.ceil(maxV / step) * step;
     const y = (v) => M.t + ph - (v / top) * ph;
@@ -3998,8 +4093,10 @@ function mountStats(root, { visible = () => true } = {}) {
       hits += `<rect class="hit${b.future ? ' future' : ''}" data-i="${i}" x="${M.l + slot * i}" y="0" width="${slot}" height="${H}"><title>${esc(b.label)}: ${fmtDur(b.total)}</title></rect>`;
     });
     const goalSvg = goal
-      ? `<line class="goal" x1="${M.l}" x2="${W - M.r}" y1="${y(goal)}" y2="${y(goal)}"/>
-         <text class="goal-label" x="${W - M.r}" y="${y(goal) - 5}" text-anchor="end">Goal ${axisFmt(goal)}</text>`
+      ? `<g class="goal-line-wrap" data-goal-opt="daily" role="button" tabindex="0" style="cursor:pointer" title="Daily goal: ${axisFmt(goal)} · Tap to edit">
+           <line class="goal" x1="${M.l}" x2="${W - M.r}" y1="${y(goal)}" y2="${y(goal)}"/>
+           <text class="goal-label" x="${W - M.r}" y="${y(goal) - 5}" text-anchor="end">Goal ${axisFmt(goal)}</text>
+         </g>`
       : '';
     st.geom = { tops, W };
     wrap.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Focus time per ${st.range === 'year' ? 'month' : 'day'}">
@@ -4120,6 +4217,8 @@ function mountStats(root, { visible = () => true } = {}) {
     }
     if (e.target.closest('[data-cat-edit]')) return openCategoryEditor(catById(st.cat), render);
     if (e.target.closest('[data-cat-del]')) return deleteCategory(catById(st.cat));
+    const gOpt = e.target.closest('[data-goal-opt]');
+    if (gOpt) return openGoalSheet(render, gOpt.dataset.goalOpt || 'daily');
     const sess = e.target.closest('[data-sess]');
     if (sess) return openSessionEditor(data.sessions.find((s) => s.id === sess.dataset.sess), st.sel, render);
     if (e.target.closest('[data-add]')) openSessionEditor(null, st.sel, render);
@@ -4149,7 +4248,7 @@ return { mountStats };
 __m.home = (() => {
 // Home: the current time fills the screen. Scroll down and the day's details rise into
 // view: today's time, this week, your consistency and recent sessions.
-const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev, on } = __m.store;
+const { data, dayKey, dayData, addDays, keyDate, weekStartKey, goalFor, weeklyGoal, catById, recentSessions, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, lookOf, dataRev, on } = __m.store;
 const engine = __m.engine;
 const { makeFace, homeFaceType } = __m.faces;
 const { icon } = __m.ui;
@@ -4339,7 +4438,7 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     const H = 140;
     const M = { t: 20, b: 22, l: 2, r: 2 };
     const ph = H - M.t - M.b;
-    const max = Math.max(goal, ...list.map((d) => d.v), 30 * MIN) * 1.05;
+    const max = Math.max(goal, ...list.map((d) => d.v), goal ? 0 : 5 * MIN) * 1.05;
     const y = (v) => M.t + ph - (v / max) * ph;
     const slotW = (W - M.l - M.r) / 7;
     const bw = Math.min(24, slotW * 0.55);
@@ -4464,9 +4563,22 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     drawnKey = key;
     const t = dayKey(now);
     const goal = goalFor(null);
+    const wGoal = weeklyGoal();
+    const ws = weekStartKey(t);
+    let weekTotal = 0;
+    for (let i = 0; i < 7; i++) {
+      const k = addDays(ws, i);
+      if (k <= t) weekTotal += dayData(k, now).total;
+    }
+    const weekGoalPill = wGoal
+      ? `<button class="chip sm ghost legend-goal" data-goal-weekly title="Weekly goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>${fmtDur(weekTotal)} / ${fmtDur(wGoal)}</button>`
+      : goal
+        ? `<button class="chip sm ghost legend-goal" data-goal-daily title="Daily goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>Goal ${fmtDur(goal)}</button>`
+        : `<button class="chip sm ghost legend-goal" data-goal-weekly title="Set weekly goal" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px">${icon('plus')} Goal</button>`;
+
     bento.innerHTML =
       todayCard(dayData(t, now), now) +
-        `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${goal ? `<span class="legend-goal"><i></i>Goal ${fmtDur(goal)}</span>` : ''}</div><div class="chart-slot" data-chart="week"></div></section>` +
+        `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${weekGoalPill}</div><div class="chart-slot" data-chart="week"></div></section>` +
         `<section class="dash-card g-m"><div class="card-head"><h3>Consistency</h3><span data-note></span></div><div class="chart-slot" data-chart="heat"></div>
           <div class="hm-legend"><span>Less</span>${HEAT.map((f) => `<i style="background:${f}"></i>`).join('')}<span>More</span>${goal ? '<span class="hm-note">· full colour = goal met</span>' : ''}</div></section>` +
         recentCard(now) +
@@ -4503,7 +4615,8 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
     }
     if (e.target.closest('[data-settings]')) return openSettings();
     if (e.target.closest('[data-looks]')) return openLooks();
-    if (e.target.closest('[data-goal]')) return openGoalSheet(refresh);
+    if (e.target.closest('[data-goal]') || e.target.closest('[data-goal-daily]')) return openGoalSheet(refresh, 'daily');
+    if (e.target.closest('[data-goal-weekly]')) return openGoalSheet(refresh, 'weekly');
     if (e.target.closest('[data-cue]')) return root.scrollTo({ top: bento.offsetTop - parseFloat(getComputedStyle(root).paddingTop), behavior: 'smooth' });
     const go = e.target.closest('[data-go]');
     if (go) return goTab(go.dataset.go);
@@ -5347,6 +5460,7 @@ function openSettings() {
           'Tracking',
           row('Categories', '<button class="btn sm" data-cats>Edit</button>', 'Add, rename, recolour or delete') +
             row('Daily goal', stepperEl('goal', s.goal, { min: 0, max: 1440, step: 15, fmt: 'goal' }, 'daily goal'), 'Total focus time per day, all categories together') +
+            row('Weekly goal', stepperEl('weeklyGoal', s.weeklyGoal || 0, { min: 0, max: 6000, step: 60, fmt: 'goal' }, 'weekly goal'), 'Target focus time per week (0 = no goal)') +
             row('Week starts on', segEl('weekStart', s.weekStart, [[1, 'Mon'], [0, 'Sun'], [6, 'Sat']], 'Week starts on')) +
             row(
               'New day starts at',

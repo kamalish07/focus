@@ -1,15 +1,19 @@
-import { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, catById, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, streak, NONE, usesNone } from './store.js';
+import { data, dataRev, on, dayKey, dayData, addDays, keyDate, keyOf, weekStartKey, goalFor, weeklyGoal, catById, sessionsOnDay, sessionDur, sessionEnd, sessionInfo, streak, NONE, usesNone } from './store.js';
 import { icon } from './ui.js';
-import { openSessionEditor, openCategoryEditor, deleteCategory } from './sheets.js';
+import { openSessionEditor, openCategoryEditor, deleteCategory, openGoalSheet } from './sheets.js';
 import * as engine from './engine.js';
 import { esc, fmtDur, fmtTime, fmtDate, clamp, MIN, HOUR } from './util.js';
 
 const MODE_ICON = { stopwatch: 'stopwatch', timer: 'timer', pomodoro: 'pomodoro', manual: 'manual' };
 const MODE_NAME = { stopwatch: 'Stopwatch', timer: 'Timer', pomodoro: 'Pomodoro', manual: 'Added manually' };
-const STEPS_MIN = [5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 960, 1200, 1440, 1800, 2400, 3000, 3600, 4800, 6000, 7200, 9000, 12000];
+const STEPS_MIN = [1, 2, 5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 360, 480, 600, 720, 960, 1200, 1440, 1800, 2400, 3000, 3600, 4800, 6000, 7200, 9000, 12000];
 
 const niceStep = (max) => (STEPS_MIN.find((m) => max / (m * MIN) <= 4) || 24000) * MIN;
-const axisFmt = (ms) => (ms < HOUR ? `${Math.round(ms / MIN)}m` : `${+(ms / HOUR).toFixed(1)}h`);
+const axisFmt = (ms) => {
+  if (ms < MIN) return `${Math.round(ms / 1000)}s`;
+  if (ms < HOUR) return `${Math.round(ms / MIN)}m`;
+  return `${+(ms / HOUR).toFixed(1)}h`;
+};
 const fmtDay = (k, opts) => fmtDate(keyDate(k), opts);
 
 /** Renders the Statistics tab into `root`. Call refresh() whenever the tab is shown. */
@@ -118,6 +122,7 @@ export function mountStats(root, { visible = () => true } = {}) {
     }
     const days = streak(st.cat);
     const current = keys.includes(t);
+    const wGoal = st.cat ? 0 : weeklyGoal();
     const period = current ? { week: 'This week', month: 'This month', year: 'This year' }[st.range] : 'Total';
     const rangeTotals = {};
     for (const b of st.buckets) for (const [id, v] of Object.entries(b.cats)) rangeTotals[id] = (rangeTotals[id] || 0) + v;
@@ -158,6 +163,15 @@ export function mountStats(root, { visible = () => true } = {}) {
           <div><span>Daily average</span><b>${fmtDur(avg)}</b></div>
           <div><span>Best day</span><b>${best.ms ? fmtDur(best.ms) : '0m'}</b>${best.k ? `<small>${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</small>` : ''}</div>
           <div><span>Streak</span><b>${days} ${days === 1 ? 'day' : 'days'}</b></div>
+          ${
+            st.range === 'week'
+              ? `<div class="stat-goal-tile" role="button" tabindex="0" data-goal-opt="weekly" style="cursor:pointer" title="Weekly goal · Tap to edit">
+                  <span style="display:flex;align-items:center;gap:4px">Weekly goal ${icon('edit', 'inline')}</span>
+                  <b>${wGoal ? fmtDur(wGoal) : 'Set goal'}</b>
+                  ${wGoal ? `<small>${Math.round((total / wGoal) * 100)}% met</small>` : '<small>Tap to set</small>'}
+                </div>`
+              : ''
+          }
         </div>
       </section>
       <section class="chart-card">
@@ -196,7 +210,7 @@ export function mountStats(root, { visible = () => true } = {}) {
     const pw = W - M.l - M.r;
     const ph = H - M.t - M.b;
     const goal = st.range === 'year' ? 0 : goalFor(st.cat);
-    const maxV = Math.max(goal, ...bs.map((b) => b.total), 30 * MIN);
+    const maxV = Math.max(goal, ...bs.map((b) => b.total), goal ? 0 : 5 * MIN);
     const step = niceStep(maxV);
     const top = Math.ceil(maxV / step) * step;
     const y = (v) => M.t + ph - (v / top) * ph;
@@ -243,8 +257,10 @@ export function mountStats(root, { visible = () => true } = {}) {
       hits += `<rect class="hit${b.future ? ' future' : ''}" data-i="${i}" x="${M.l + slot * i}" y="0" width="${slot}" height="${H}"><title>${esc(b.label)}: ${fmtDur(b.total)}</title></rect>`;
     });
     const goalSvg = goal
-      ? `<line class="goal" x1="${M.l}" x2="${W - M.r}" y1="${y(goal)}" y2="${y(goal)}"/>
-         <text class="goal-label" x="${W - M.r}" y="${y(goal) - 5}" text-anchor="end">Goal ${axisFmt(goal)}</text>`
+      ? `<g class="goal-line-wrap" data-goal-opt="daily" role="button" tabindex="0" style="cursor:pointer" title="Daily goal: ${axisFmt(goal)} · Tap to edit">
+           <line class="goal" x1="${M.l}" x2="${W - M.r}" y1="${y(goal)}" y2="${y(goal)}"/>
+           <text class="goal-label" x="${W - M.r}" y="${y(goal) - 5}" text-anchor="end">Goal ${axisFmt(goal)}</text>
+         </g>`
       : '';
     st.geom = { tops, W };
     wrap.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Focus time per ${st.range === 'year' ? 'month' : 'day'}">
@@ -365,6 +381,8 @@ export function mountStats(root, { visible = () => true } = {}) {
     }
     if (e.target.closest('[data-cat-edit]')) return openCategoryEditor(catById(st.cat), render);
     if (e.target.closest('[data-cat-del]')) return deleteCategory(catById(st.cat));
+    const gOpt = e.target.closest('[data-goal-opt]');
+    if (gOpt) return openGoalSheet(render, gOpt.dataset.goalOpt || 'daily');
     const sess = e.target.closest('[data-sess]');
     if (sess) return openSessionEditor(data.sessions.find((s) => s.id === sess.dataset.sess), st.sel, render);
     if (e.target.closest('[data-add]')) openSessionEditor(null, st.sel, render);
