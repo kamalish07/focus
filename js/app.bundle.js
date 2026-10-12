@@ -5,7 +5,7 @@ const __m = {};
 
 // ---------- config.js ----------
 __m.config = (() => {
-const APP_VERSION = '1.11.4';
+const APP_VERSION = '1.11.5';
 
 /** Supabase credentials for cloud account and cross-device sync. Can also be set in Settings. */
 const SUPABASE_URL = 'https://vwkskocgrkziherzmnms.supabase.co';
@@ -2862,7 +2862,25 @@ function mergeUserData(local, cloud) {
   const cloudSettings = { ...(cloud.settings || {}) };
   const cloudRunners = cloud.runners || cloudSettings._runners || null;
   delete cloudSettings._runners;
-  const mergedSettings = { ...local.settings, ...cloudSettings };
+
+  const localTouched = Number(local.settings?._touched || 0);
+  const cloudTouched = Number(cloudSettings?._touched || 0);
+
+  // If local settings were touched more recently (or equal), local settings win.
+  // Otherwise cloud settings win.
+  const baseSettings = localTouched >= cloudTouched
+    ? { ...cloudSettings, ...local.settings }
+    : { ...local.settings, ...cloudSettings };
+
+  // Always protect non-zero weeklyGoal or goal if local recently set it
+  if (local.settings?.weeklyGoal && !baseSettings.weeklyGoal && localTouched >= cloudTouched) {
+    baseSettings.weeklyGoal = local.settings.weeklyGoal;
+  }
+  if (local.settings?.goal && !baseSettings.goal && localTouched >= cloudTouched) {
+    baseSettings.goal = local.settings.goal;
+  }
+
+  const mergedSettings = baseSettings;
   delete mergedSettings._runners;
 
   const mergedRunners = {};
@@ -3152,7 +3170,7 @@ return { getSupabaseConfig, setSupabaseConfig, isConfigured, getStoredSession, c
 
 // ---------- sheets.js ----------
 __m.sheets = (() => {
-const { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, rawDur, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
+const { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, weekStartKey, addDays, rawDur, sessionDur, sessionInfo, nextColor, NONE } = __m.store;
 const { PALETTE, TIMER_PRESETS } = __m.config;
 const engine = __m.engine;
 const { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } = __m.ui;
@@ -3286,11 +3304,21 @@ function editPomodoro() {
 
 /* ---------- daily goal ---------- */
 
-/** Goal sheet: set Daily and Weekly focus goals. */
-function openGoalSheet(onDone, initialTab = 'daily') {
+/** Goal sheet: set Daily and Weekly focus goals with live progress bar. */
+function openGoalSheet(onDone, initialTab = 'weekly') {
   let tab = initialTab === 'weekly' ? 'weekly' : 'daily';
   let curDaily = data.settings.goal || 0;
   let curWeekly = data.settings.weeklyGoal || 0;
+
+  const now = Date.now();
+  const t = dayKey(now);
+  const ws = weekStartKey(t);
+  let weekTotal = 0;
+  for (let i = 0; i < 7; i++) {
+    const k = addDays(ws, i);
+    if (k <= t) weekTotal += dayData(k, now).total;
+  }
+  const todayTotal = dayData(t, now).total;
 
   const dailyPresets = [30, 60, 120, 180, 240, 360];
   const weeklyPresets = [300, 600, 900, 1200, 1500, 1800, 2400]; // 5h, 10h, 15h, 20h, 25h, 30h, 40h
@@ -3298,14 +3326,22 @@ function openGoalSheet(onDone, initialTab = 'daily') {
   const sh = sheet({
     title: 'Focus goals',
     body: `
-      <div class="seg" role="tablist" style="margin-bottom:14px">
-        <button role="tab" data-tab="daily" aria-selected="${tab === 'daily'}">Daily goal</button>
+      <div class="seg" role="tablist" style="margin-bottom:12px">
         <button role="tab" data-tab="weekly" aria-selected="${tab === 'weekly'}">Weekly goal</button>
+        <button role="tab" data-tab="daily" aria-selected="${tab === 'daily'}">Daily goal</button>
+      </div>
+      <div class="sheet-goal-progress" style="margin-bottom:12px;padding:11px 13px;background:var(--surface-2);border-radius:14px;border:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13.5px;margin-bottom:6px">
+          <span data-prog-title><b>Week focus</b></span>
+          <span data-prog-pct style="font-weight:700;color:var(--accent)">0%</span>
+        </div>
+        <div class="meter"><i data-prog-bar style="width:0%"></i></div>
+        <div data-prog-sub style="font-size:12px;color:var(--muted);margin-top:5px"></div>
       </div>
       <p class="hint" data-hint></p>
       <div class="wheels"></div>
-      <div class="chips center" data-presets></div>
-      ${actions('Save goals', '<button class="btn" data-clear>Clear</button>')}`,
+      <div class="chips center" data-presets style="margin-top:12px"></div>
+      ${actions('Save goal', '<button class="btn" data-clear>Clear</button>')}`,
   });
 
   const box = sh.body.querySelector('.wheels');
@@ -3315,10 +3351,38 @@ function openGoalSheet(onDone, initialTab = 'daily') {
 
   const hintEl = sh.body.querySelector('[data-hint]');
   const presetsEl = sh.body.querySelector('[data-presets]');
+  const progTitle = sh.body.querySelector('[data-prog-title]');
+  const progPct = sh.body.querySelector('[data-prog-pct]');
+  const progBar = sh.body.querySelector('[data-prog-bar]');
+  const progSub = sh.body.querySelector('[data-prog-sub]');
+
+  const updateProgress = () => {
+    const curVal = wh.get() * 60 + wm.get();
+    if (tab === 'weekly') {
+      const targetMs = curVal * MIN;
+      const pct = targetMs ? Math.round((weekTotal / targetMs) * 100) : 0;
+      progTitle.innerHTML = `<b>Week focus</b> · ${fmtDur(weekTotal)}${curVal ? ` / ${fmtDur(targetMs)}` : ''}`;
+      progPct.textContent = curVal ? `${pct}%` : 'No goal';
+      progBar.style.width = `${Math.min(100, pct)}%`;
+      progSub.textContent = curVal
+        ? (weekTotal >= targetMs ? 'Weekly goal reached! 🎉' : `${fmtDur(targetMs - weekTotal)} remaining this week`)
+        : 'Choose a target focus time for Monday through Sunday';
+    } else {
+      const targetMs = curVal * MIN;
+      const pct = targetMs ? Math.round((todayTotal / targetMs) * 100) : 0;
+      progTitle.innerHTML = `<b>Today focus</b> · ${fmtDur(todayTotal)}${curVal ? ` / ${fmtDur(targetMs)}` : ''}`;
+      progPct.textContent = curVal ? `${pct}%` : 'No goal';
+      progBar.style.width = `${Math.min(100, pct)}%`;
+      progSub.textContent = curVal
+        ? (todayTotal >= targetMs ? 'Daily goal reached! 🎉' : `${fmtDur(targetMs - todayTotal)} to go today`)
+        : 'Choose a daily focus target across all categories';
+    }
+  };
 
   const setTo = (m, smooth) => {
     wh.set(Math.floor(m / 60), smooth);
     wm.set(Math.round((m % 60) / 5) * 5, smooth);
+    updateProgress();
   };
 
   const syncTabUI = () => {
@@ -3330,11 +3394,16 @@ function openGoalSheet(onDone, initialTab = 'daily') {
     } else {
       hintEl.textContent = 'Target focus time per week (Monday to Sunday), all categories together.';
       presetsEl.innerHTML = weeklyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
-      setTo(curWeekly || 900); // 15h default
+      setTo(curWeekly || 900); // 15h default suggestion if 0
     }
   };
 
   syncTabUI();
+
+  wh.firstElementChild?.addEventListener('scroll', () => setTimeout(updateProgress, 20), { passive: true });
+  wm.firstElementChild?.addEventListener('scroll', () => setTimeout(updateProgress, 20), { passive: true });
+  wh.addEventListener('click', () => setTimeout(updateProgress, 20));
+  wm.addEventListener('click', () => setTimeout(updateProgress, 20));
 
   sh.body.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('[data-tab]');
@@ -3370,7 +3439,9 @@ function openGoalSheet(onDone, initialTab = 'daily') {
       else curWeekly = curVal;
       data.settings.goal = curDaily;
       data.settings.weeklyGoal = curWeekly;
+      data.settings._touched = Date.now();
       save();
+      sync({ silent: true });
       sh.close();
       onDone?.();
       const parts = [];
@@ -3995,6 +4066,21 @@ function mountStats(root, { visible = () => true } = {}) {
       <section class="hero-card g-m">
         <div class="hero-label">${period}${st.cat ? ` · ${esc(catById(st.cat).name)}` : ''}</div>
         <div class="hero">${fmtDur(total)}</div>
+        ${
+          st.range === 'week'
+            ? `<div class="hero-progress-box" data-goal-opt="weekly" role="button" tabindex="0" style="cursor:pointer" title="Weekly goal · Tap to edit">
+                <div class="hpb-head">
+                  <span><b>${fmtDur(total)}</b>${wGoal ? ` of ${fmtDur(wGoal)} weekly goal` : ' focused this week'}</span>
+                  ${wGoal ? `<b>${Math.round((total / wGoal) * 100)}%</b>` : '<span class="wph-hint">+ Set weekly goal</span>'}
+                </div>
+                <div class="meter"><i style="width:${wGoal ? Math.min(100, Math.round((total / wGoal) * 100)) : 0}%"></i></div>
+                <div class="hpb-sub">
+                  <span>${wGoal ? (total >= wGoal ? 'Weekly goal reached! 🎉' : `${fmtDur(wGoal - total)} remaining this week`) : 'Tap to set a weekly goal'}</span>
+                  ${wGoal ? `<span>${Math.round((total / wGoal) * 100)}%</span>` : ''}
+                </div>
+              </div>`
+            : ''
+        }
         <div class="hero-stats">
           <div><span>Daily average</span><b>${fmtDur(avg)}</b></div>
           <div><span>Best day</span><b>${best.ms ? fmtDur(best.ms) : '0m'}</b>${best.k ? `<small>${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</small>` : ''}</div>
@@ -4571,14 +4657,32 @@ function mountHome(root, { goTab, openSettings, openLooks, togglePlay, visible }
       if (k <= t) weekTotal += dayData(k, now).total;
     }
     const weekGoalPill = wGoal
-      ? `<button class="chip sm ghost legend-goal" data-goal-weekly title="Weekly goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>${fmtDur(weekTotal)} / ${fmtDur(wGoal)}</button>`
+      ? `<button class="chip sm ghost legend-goal" data-goal-weekly title="Weekly goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>${fmtDur(wGoal)}/wk</button>`
       : goal
         ? `<button class="chip sm ghost legend-goal" data-goal-daily title="Daily goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>Goal ${fmtDur(goal)}</button>`
         : `<button class="chip sm ghost legend-goal" data-goal-weekly title="Set weekly goal" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px">${icon('plus')} Goal</button>`;
 
+    const weekPct = wGoal ? Math.round((weekTotal / wGoal) * 100) : 0;
+    const weekProgressHtml = `
+      <div class="week-progress-box" data-goal-weekly role="button" tabindex="0" style="cursor:pointer" title="Weekly goal · Tap to edit">
+        <div class="week-progress-head">
+          <span><b>${fmtDur(weekTotal)}</b>${wGoal ? ` / ${fmtDur(wGoal)}` : ' focused this week'}</span>
+          ${wGoal ? `<span class="wph-pct">${weekPct}%</span>` : `<span class="wph-hint">${icon('plus')} Set weekly goal</span>`}
+        </div>
+        <div class="meter"><i style="width:${wGoal ? Math.min(100, weekPct) : 0}%"></i></div>
+        <div class="week-progress-sub">
+          <span>${wGoal ? (weekTotal >= wGoal ? 'Weekly goal reached! 🎉' : `${fmtDur(wGoal - weekTotal)} remaining this week`) : 'Tap to set a weekly goal'}</span>
+          ${wGoal ? `<span>${weekPct}%</span>` : ''}
+        </div>
+      </div>`;
+
     bento.innerHTML =
       todayCard(dayData(t, now), now) +
-        `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${weekGoalPill}</div><div class="chart-slot" data-chart="week"></div></section>` +
+        `<section class="dash-card g-m week-card">
+          <div class="card-head"><h3>This week</h3>${weekGoalPill}</div>
+          ${weekProgressHtml}
+          <div class="chart-slot" data-chart="week"></div>
+        </section>` +
         `<section class="dash-card g-m"><div class="card-head"><h3>Consistency</h3><span data-note></span></div><div class="chart-slot" data-chart="heat"></div>
           <div class="hm-legend"><span>Less</span>${HEAT.map((f) => `<i style="background:${f}"></i>`).join('')}<span>More</span>${goal ? '<span class="hm-note">· full colour = goal met</span>' : ''}</div></section>` +
         recentCard(now) +

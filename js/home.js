@@ -323,14 +323,32 @@ export function mountHome(root, { goTab, openSettings, openLooks, togglePlay, vi
       if (k <= t) weekTotal += dayData(k, now).total;
     }
     const weekGoalPill = wGoal
-      ? `<button class="chip sm ghost legend-goal" data-goal-weekly title="Weekly goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>${fmtDur(weekTotal)} / ${fmtDur(wGoal)}</button>`
+      ? `<button class="chip sm ghost legend-goal" data-goal-weekly title="Weekly goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>${fmtDur(wGoal)}/wk</button>`
       : goal
         ? `<button class="chip sm ghost legend-goal" data-goal-daily title="Daily goal · Tap to edit" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px"><i></i>Goal ${fmtDur(goal)}</button>`
         : `<button class="chip sm ghost legend-goal" data-goal-weekly title="Set weekly goal" style="cursor:pointer;height:24px;padding:0 8px;font-size:11.5px">${icon('plus')} Goal</button>`;
 
+    const weekPct = wGoal ? Math.round((weekTotal / wGoal) * 100) : 0;
+    const weekProgressHtml = `
+      <div class="week-progress-box" data-goal-weekly role="button" tabindex="0" style="cursor:pointer" title="Weekly goal · Tap to edit">
+        <div class="week-progress-head">
+          <span><b>${fmtDur(weekTotal)}</b>${wGoal ? ` / ${fmtDur(wGoal)}` : ' focused this week'}</span>
+          ${wGoal ? `<span class="wph-pct">${weekPct}%</span>` : `<span class="wph-hint">${icon('plus')} Set weekly goal</span>`}
+        </div>
+        <div class="meter"><i style="width:${wGoal ? Math.min(100, weekPct) : 0}%"></i></div>
+        <div class="week-progress-sub">
+          <span>${wGoal ? (weekTotal >= wGoal ? 'Weekly goal reached! 🎉' : `${fmtDur(wGoal - weekTotal)} remaining this week`) : 'Tap to set a weekly goal'}</span>
+          ${wGoal ? `<span>${weekPct}%</span>` : ''}
+        </div>
+      </div>`;
+
     bento.innerHTML =
       todayCard(dayData(t, now), now) +
-        `<section class="dash-card g-m"><div class="card-head"><h3>This week</h3>${weekGoalPill}</div><div class="chart-slot" data-chart="week"></div></section>` +
+        `<section class="dash-card g-m week-card">
+          <div class="card-head"><h3>This week</h3>${weekGoalPill}</div>
+          ${weekProgressHtml}
+          <div class="chart-slot" data-chart="week"></div>
+        </section>` +
         `<section class="dash-card g-m"><div class="card-head"><h3>Consistency</h3><span data-note></span></div><div class="chart-slot" data-chart="heat"></div>
           <div class="hm-legend"><span>Less</span>${HEAT.map((f) => `<i style="background:${f}"></i>`).join('')}<span>More</span>${goal ? '<span class="hm-note">· full colour = goal met</span>' : ''}</div></section>` +
         recentCard(now) +

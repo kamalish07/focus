@@ -397,7 +397,25 @@ export function mergeUserData(local, cloud) {
   const cloudSettings = { ...(cloud.settings || {}) };
   const cloudRunners = cloud.runners || cloudSettings._runners || null;
   delete cloudSettings._runners;
-  const mergedSettings = { ...local.settings, ...cloudSettings };
+
+  const localTouched = Number(local.settings?._touched || 0);
+  const cloudTouched = Number(cloudSettings?._touched || 0);
+
+  // If local settings were touched more recently (or equal), local settings win.
+  // Otherwise cloud settings win.
+  const baseSettings = localTouched >= cloudTouched
+    ? { ...cloudSettings, ...local.settings }
+    : { ...local.settings, ...cloudSettings };
+
+  // Always protect non-zero weeklyGoal or goal if local recently set it
+  if (local.settings?.weeklyGoal && !baseSettings.weeklyGoal && localTouched >= cloudTouched) {
+    baseSettings.weeklyGoal = local.settings.weeklyGoal;
+  }
+  if (local.settings?.goal && !baseSettings.goal && localTouched >= cloudTouched) {
+    baseSettings.goal = local.settings.goal;
+  }
+
+  const mergedSettings = baseSettings;
   delete mergedSettings._runners;
 
   const mergedRunners = {};

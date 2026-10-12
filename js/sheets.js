@@ -1,4 +1,4 @@
-import { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, rawDur, sessionDur, sessionInfo, nextColor, NONE } from './store.js';
+import { data, save, on, catById, currentCat, dayKey, dayData, dayStartTs, keyDate, weekStartKey, addDays, rawDur, sessionDur, sessionInfo, nextColor, NONE } from './store.js';
 import { PALETTE, TIMER_PRESETS } from './config.js';
 import * as engine from './engine.js';
 import { sheet, icon, toast, dialog, confirmDialog, wheel, hmsWheels, haptic, switchEl, stepperEl, bindControls } from './ui.js';
@@ -132,11 +132,21 @@ function editPomodoro() {
 
 /* ---------- daily goal ---------- */
 
-/** Goal sheet: set Daily and Weekly focus goals. */
-export function openGoalSheet(onDone, initialTab = 'daily') {
+/** Goal sheet: set Daily and Weekly focus goals with live progress bar. */
+export function openGoalSheet(onDone, initialTab = 'weekly') {
   let tab = initialTab === 'weekly' ? 'weekly' : 'daily';
   let curDaily = data.settings.goal || 0;
   let curWeekly = data.settings.weeklyGoal || 0;
+
+  const now = Date.now();
+  const t = dayKey(now);
+  const ws = weekStartKey(t);
+  let weekTotal = 0;
+  for (let i = 0; i < 7; i++) {
+    const k = addDays(ws, i);
+    if (k <= t) weekTotal += dayData(k, now).total;
+  }
+  const todayTotal = dayData(t, now).total;
 
   const dailyPresets = [30, 60, 120, 180, 240, 360];
   const weeklyPresets = [300, 600, 900, 1200, 1500, 1800, 2400]; // 5h, 10h, 15h, 20h, 25h, 30h, 40h
@@ -144,14 +154,22 @@ export function openGoalSheet(onDone, initialTab = 'daily') {
   const sh = sheet({
     title: 'Focus goals',
     body: `
-      <div class="seg" role="tablist" style="margin-bottom:14px">
-        <button role="tab" data-tab="daily" aria-selected="${tab === 'daily'}">Daily goal</button>
+      <div class="seg" role="tablist" style="margin-bottom:12px">
         <button role="tab" data-tab="weekly" aria-selected="${tab === 'weekly'}">Weekly goal</button>
+        <button role="tab" data-tab="daily" aria-selected="${tab === 'daily'}">Daily goal</button>
+      </div>
+      <div class="sheet-goal-progress" style="margin-bottom:12px;padding:11px 13px;background:var(--surface-2);border-radius:14px;border:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:13.5px;margin-bottom:6px">
+          <span data-prog-title><b>Week focus</b></span>
+          <span data-prog-pct style="font-weight:700;color:var(--accent)">0%</span>
+        </div>
+        <div class="meter"><i data-prog-bar style="width:0%"></i></div>
+        <div data-prog-sub style="font-size:12px;color:var(--muted);margin-top:5px"></div>
       </div>
       <p class="hint" data-hint></p>
       <div class="wheels"></div>
-      <div class="chips center" data-presets></div>
-      ${actions('Save goals', '<button class="btn" data-clear>Clear</button>')}`,
+      <div class="chips center" data-presets style="margin-top:12px"></div>
+      ${actions('Save goal', '<button class="btn" data-clear>Clear</button>')}`,
   });
 
   const box = sh.body.querySelector('.wheels');
@@ -161,10 +179,38 @@ export function openGoalSheet(onDone, initialTab = 'daily') {
 
   const hintEl = sh.body.querySelector('[data-hint]');
   const presetsEl = sh.body.querySelector('[data-presets]');
+  const progTitle = sh.body.querySelector('[data-prog-title]');
+  const progPct = sh.body.querySelector('[data-prog-pct]');
+  const progBar = sh.body.querySelector('[data-prog-bar]');
+  const progSub = sh.body.querySelector('[data-prog-sub]');
+
+  const updateProgress = () => {
+    const curVal = wh.get() * 60 + wm.get();
+    if (tab === 'weekly') {
+      const targetMs = curVal * MIN;
+      const pct = targetMs ? Math.round((weekTotal / targetMs) * 100) : 0;
+      progTitle.innerHTML = `<b>Week focus</b> · ${fmtDur(weekTotal)}${curVal ? ` / ${fmtDur(targetMs)}` : ''}`;
+      progPct.textContent = curVal ? `${pct}%` : 'No goal';
+      progBar.style.width = `${Math.min(100, pct)}%`;
+      progSub.textContent = curVal
+        ? (weekTotal >= targetMs ? 'Weekly goal reached! 🎉' : `${fmtDur(targetMs - weekTotal)} remaining this week`)
+        : 'Choose a target focus time for Monday through Sunday';
+    } else {
+      const targetMs = curVal * MIN;
+      const pct = targetMs ? Math.round((todayTotal / targetMs) * 100) : 0;
+      progTitle.innerHTML = `<b>Today focus</b> · ${fmtDur(todayTotal)}${curVal ? ` / ${fmtDur(targetMs)}` : ''}`;
+      progPct.textContent = curVal ? `${pct}%` : 'No goal';
+      progBar.style.width = `${Math.min(100, pct)}%`;
+      progSub.textContent = curVal
+        ? (todayTotal >= targetMs ? 'Daily goal reached! 🎉' : `${fmtDur(targetMs - todayTotal)} to go today`)
+        : 'Choose a daily focus target across all categories';
+    }
+  };
 
   const setTo = (m, smooth) => {
     wh.set(Math.floor(m / 60), smooth);
     wm.set(Math.round((m % 60) / 5) * 5, smooth);
+    updateProgress();
   };
 
   const syncTabUI = () => {
@@ -176,11 +222,16 @@ export function openGoalSheet(onDone, initialTab = 'daily') {
     } else {
       hintEl.textContent = 'Target focus time per week (Monday to Sunday), all categories together.';
       presetsEl.innerHTML = weeklyPresets.map((m) => `<button class="chip" data-set="${m}">${fmtDur(m * MIN)}</button>`).join('');
-      setTo(curWeekly || 900); // 15h default
+      setTo(curWeekly || 900); // 15h default suggestion if 0
     }
   };
 
   syncTabUI();
+
+  wh.firstElementChild?.addEventListener('scroll', () => setTimeout(updateProgress, 20), { passive: true });
+  wm.firstElementChild?.addEventListener('scroll', () => setTimeout(updateProgress, 20), { passive: true });
+  wh.addEventListener('click', () => setTimeout(updateProgress, 20));
+  wm.addEventListener('click', () => setTimeout(updateProgress, 20));
 
   sh.body.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('[data-tab]');
@@ -216,7 +267,9 @@ export function openGoalSheet(onDone, initialTab = 'daily') {
       else curWeekly = curVal;
       data.settings.goal = curDaily;
       data.settings.weeklyGoal = curWeekly;
+      data.settings._touched = Date.now();
       save();
+      sync({ silent: true });
       sh.close();
       onDone?.();
       const parts = [];

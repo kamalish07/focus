@@ -674,7 +674,7 @@ input[type='range'] { width: min(180px, 40vw); accent-color: var(--accent); }
 .hero-label { color: var(--muted); font-size: 13px; font-weight: 600; }
 .hero { font-size: 48px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; margin: 2px 0 12px; }
 .meter { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
-.meter i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.meter i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .3s ease; }
 .hero-sub { color: var(--muted); font-size: 13px; margin-top: 8px; }
 .hero-stats {
   display: grid;
@@ -711,6 +711,57 @@ input[type='range'] { width: min(180px, 40vw); accent-color: var(--accent); }
 }
 .stat-goal-tile b {
   color: var(--accent);
+}
+.week-progress-box {
+  margin: 6px 0 14px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  transition: border-color .15s ease, background .15s ease;
+}
+.week-progress-box:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+.week-progress-head, .hpb-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13.5px;
+  margin-bottom: 7px;
+}
+.week-progress-head b, .hpb-head b {
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.wph-pct, .hpb-head b:last-child {
+  color: var(--accent);
+  font-weight: 700;
+}
+.wph-hint {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.week-progress-sub, .hpb-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.hero-progress-box {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  transition: border-color .15s ease;
+}
+.hero-progress-box:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
 }
 .chips.filter { overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom: 2px; }
 .chips.filter .chip { flex: none; }

@@ -159,6 +159,21 @@ export function mountStats(root, { visible = () => true } = {}) {
       <section class="hero-card g-m">
         <div class="hero-label">${period}${st.cat ? ` · ${esc(catById(st.cat).name)}` : ''}</div>
         <div class="hero">${fmtDur(total)}</div>
+        ${
+          st.range === 'week'
+            ? `<div class="hero-progress-box" data-goal-opt="weekly" role="button" tabindex="0" style="cursor:pointer" title="Weekly goal · Tap to edit">
+                <div class="hpb-head">
+                  <span><b>${fmtDur(total)}</b>${wGoal ? ` of ${fmtDur(wGoal)} weekly goal` : ' focused this week'}</span>
+                  ${wGoal ? `<b>${Math.round((total / wGoal) * 100)}%</b>` : '<span class="wph-hint">+ Set weekly goal</span>'}
+                </div>
+                <div class="meter"><i style="width:${wGoal ? Math.min(100, Math.round((total / wGoal) * 100)) : 0}%"></i></div>
+                <div class="hpb-sub">
+                  <span>${wGoal ? (total >= wGoal ? 'Weekly goal reached! 🎉' : `${fmtDur(wGoal - total)} remaining this week`) : 'Tap to set a weekly goal'}</span>
+                  ${wGoal ? `<span>${Math.round((total / wGoal) * 100)}%</span>` : ''}
+                </div>
+              </div>`
+            : ''
+        }
         <div class="hero-stats">
           <div><span>Daily average</span><b>${fmtDur(avg)}</b></div>
           <div><span>Best day</span><b>${best.ms ? fmtDur(best.ms) : '0m'}</b>${best.k ? `<small>${esc(fmtDay(best.k, { month: 'short', day: 'numeric' }))}</small>` : ''}</div>
